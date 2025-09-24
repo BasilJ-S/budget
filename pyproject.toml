@@ -6,13 +6,14 @@ authors = [
     {name = "BasilJ-S",email = "18bjjs@queensu.ca"}
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pandas (>=2.3.2,<3.0.0)",
     "matplotlib (>=3.10.6,<4.0.0)",
     "dash (>=3.2.0,<4.0.0)",
     "pyyaml (>=6.0.2,<7.0.0)",
     "pytest (>=8.4.2,<9.0.0)",
+    "numpy (>=2.3.3,<3.0.0)",
 ]
 
 [tool.poetry]
