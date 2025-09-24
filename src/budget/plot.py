@@ -1,6 +1,6 @@
 import pandas as pd
 import dash
-from dash import dcc, html
+from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import plotly.express as px
 import plotly.graph_objects as go
@@ -183,17 +183,27 @@ def update_chart(selected_month, num_months, selected_category):
             color_discrete_map={'total_in': 'green', 'total_out': 'red'}
         )
 
+    transactions = df[df['month'] == selected_month]
+    # Format columns for display
+    transactions_display = transactions.copy()
+    transactions_display['date'] = transactions_display['date'].dt.strftime('%Y-%m-%d')
+
+
     # Table
-    table = html.Table([
-        html.Thead(html.Tr([html.Th("Month"), html.Th("Money In"), html.Th("Money Out")])),
-        html.Tbody([
-            html.Tr([
-                html.Td(filtered_overall['month'].values[0]),
-                html.Td(f"${filtered_overall['total_in'].values[0]:,.2f}"),
-                html.Td(f"${filtered_overall['total_out'].values[0]:,.2f}")
-            ])
-        ])
-    ])
+
+    table = dash_table.DataTable(
+    columns=[
+        {"name": "Date", "id": "date"},
+        {"name": "Description", "id": "description"},
+        {"name": "Category", "id": "category"},
+        {"name": "Money In", "id": "money_in"},
+        {"name": "Money Out", "id": "money_out"},
+    ],
+        data=transactions_display.to_dict('records'),
+        style_table={'overflowX': 'auto'},
+        style_cell={'textAlign': 'left'},
+        sort_action='native',
+    )
 
     return figure, line_figure, table, category_figure
 
