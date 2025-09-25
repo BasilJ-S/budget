@@ -45,7 +45,7 @@ def apply_rules(df, ruleset):
 
             matches = df['description'].str.contains(rule.string_to_match, regex = False)
             if matches.sum() > 0:
-                print(matches.sum(), "matches for", rule.string_to_match)
+                print(matches.sum(), "matches for", rule.string_to_match, " -> ", rule.category)
                 df.loc[matches, 'category'] = rule.category + ', ' + df.loc[matches, 'category']
             
 
