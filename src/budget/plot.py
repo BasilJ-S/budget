@@ -5,6 +5,7 @@ from dash.dependencies import Input, Output
 import plotly.express as px
 import plotly.graph_objects as go
 import itertools
+from budget import read_budget
 
 # Read the transactions CSV
 df = pd.read_csv('src/budget/data/transactions.csv')
@@ -34,17 +35,22 @@ app = dash.Dash(__name__)
 
 app.layout = html.Div([
     html.H1("Monthly Money Summary"),
-    
     dcc.Dropdown(
         id='month-dropdown',
         options=[{'label': m, 'value': m} for m in monthly_summary['month']],
         value=monthly_summary['month'].iloc[-1],
         clearable=False
     ),
+    html.H2("Money In/Out for Selected Month"),
     html.Div([
         dcc.Graph(id='monthly-bar-chart', style={'display': 'inline-block'}),
         dcc.Graph(id='monthly-category-chart', style={'display': 'inline-block'})
     ], className='row'),
+
+
+    html.H2("Budget vs Actuals"),
+    dcc.Graph(id="monthly-budget-chart"),
+
 
     dcc.Dropdown(
         id='num-months-dropdown',
@@ -72,6 +78,7 @@ app.layout = html.Div([
     Output('monthly-line-chart', 'figure'),
     Output('monthly-summary-table', 'children'),
     Output('monthly-category-chart', 'figure'),
+    Output('monthly-budget-chart', 'figure'),
     Input('month-dropdown', 'value'),
     Input('num-months-dropdown', 'value'),
     Input('category-dropdown', 'value')
@@ -97,6 +104,7 @@ def update_chart(selected_month, num_months, selected_category):
         color="Type",
         color_discrete_map={"Money In": "green", "Money Out": "red"}
     )
+    print("Overall Sum:", data["Amount"].sum())
 
     filtered_with_category = filtered_with_category.sort_values(by='total_out', ascending=False)
 
@@ -111,6 +119,60 @@ def update_chart(selected_month, num_months, selected_category):
         title=f'Money In/Out by Category for {selected_month}',
         labels={'value': 'Amount', 'category': 'Category'},
         color_discrete_map={'total_in': 'green', 'total_out': 'red'}
+    )
+
+
+    ### Budget vs Actuals ###
+    budget = read_budget('Student')
+    print(budget)
+
+    budget_data = pd.DataFrame(columns=['Category', 'Type', 'Value'])
+
+    for item in budget.items:
+        print(item.categories, item.budgeted_amount)
+        category_data = filtered_with_category[filtered_with_category['category'].isin(item.categories)]
+        actual_in = category_data['total_in'].sum() if not category_data.empty else 0
+        actual_out = category_data['total_out'].sum() if not category_data.empty else 0
+        actual = actual_out - actual_in
+        budget_data.loc[len(budget_data), :] = [", ".join(item.categories), 'budgeted', item.budgeted_amount]
+        budget_data.loc[len(budget_data), :] = [", ".join(item.categories), 'actual', actual]
+
+    print("BUDGET", budget_data)
+
+    ## Handle unbudgeted data ##
+    unbudgeted_categories = set([cat for item in budget.items for cat in item.categories])
+
+    # Gather unbudgeted transactions
+    unbudgeted = filtered_with_category[~filtered_with_category['category'].isin(
+        unbudgeted_categories
+    )]
+    unbudgeted_out = unbudgeted['total_out'].sum() if not unbudgeted.empty else 0
+    unbudgeted_in = unbudgeted['total_in'].sum() if not unbudgeted.empty else 0
+    unbudgeted_amount = unbudgeted_out - unbudgeted_in
+
+    # Find how much of the total budget was not allocated to any category
+    total_budgeted = sum(item.budgeted_amount for item in budget.items)
+    unallocated_budget = budget.total_budgeted - total_budgeted
+
+    budget_data.loc[len(budget_data), :] = ['Unbudgeted', 'budgeted', unallocated_budget]
+    budget_data.loc[len(budget_data), :] = ['Unbudgeted', 'actual', unbudgeted_amount]
+    print("BUDGET", budget_data)
+
+
+    budget_data = budget_data.sort_values(by=["Type", "Value"], ascending=[True, False])
+    print("Budget Sum:", budget_data[budget_data['Type'] == 'actual']['Value'].sum())
+
+    
+
+    budget_bar_fig = px.bar(
+        budget_data,
+        x='Category',
+        y='Value',
+        color='Type',
+        barmode='group',
+        title='Budgeted vs Actual by Category',
+        labels={'Value': 'Amount ($)', 'Category': 'Category', 'Type': 'Type'},
+        text=budget_data['Value'].apply(lambda v: f"${v:,.2f}")
     )
 
     start_month = str(pd.Period(selected_month, freq='M') - (num_months - 1))
@@ -199,8 +261,9 @@ def update_chart(selected_month, num_months, selected_category):
         sort_action='native',
         filter_action='native',
     )
+    print("Update complete")
 
-    return figure, line_figure, table, category_figure
+    return figure, line_figure, table, category_figure, budget_bar_fig
 
 if __name__ == '__main__':
     app.run(debug=True)
