@@ -4,6 +4,7 @@ from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import plotly.express as px
 import plotly.graph_objects as go
+import itertools
 
 # Read the transactions CSV
 df = pd.read_csv('src/budget/data/transactions.csv')
@@ -97,19 +98,8 @@ def update_chart(selected_month, num_months, selected_category):
         color_discrete_map={"Money In": "green", "Money Out": "red"}
     )
 
-    data = [[{'x': category,
-             'y': -filtered_with_category['total_in'],
-             'type': 'bar',
-             'name': category,
-             'marker': {'color': 'green'}},
-            {'x': category,
-             'y': filtered_with_category['total_out'],
-             'type': 'bar',
-             'name': category,
-             'marker': {'color': 'red'}}] for category in filtered_with_category['category'].unique()]
-    
-    # flatten the list of lists
-    data = [item for sublist in data for item in sublist]
+    filtered_with_category = filtered_with_category.sort_values(by='total_out', ascending=False)
+
 
 
     # Category bar chart
@@ -137,7 +127,6 @@ def update_chart(selected_month, num_months, selected_category):
 
         line_figure = go.Figure()
 
-        import itertools
         color_palette = px.colors.qualitative.Plotly
         color_cycle = itertools.cycle(color_palette)
         category_colors = {cat: next(color_cycle) for cat in categories}
@@ -171,8 +160,9 @@ def update_chart(selected_month, num_months, selected_category):
         )
 
     else:
-        prev_months = monthly_summary[monthly_summary['month'] <= selected_month].tail(num_months)
         prev_months = monthly_summary[(monthly_summary['month'] >= start_month) & (monthly_summary['month'] <= selected_month)]
+        average_in = prev_months["total_in"].mean()
+        average_out = prev_months["total_out"].mean()
 
         line_figure = px.line(
             prev_months,
@@ -183,10 +173,14 @@ def update_chart(selected_month, num_months, selected_category):
             color_discrete_map={'total_in': 'green', 'total_out': 'red'}
         )
 
+        line_figure = line_figure.add_hline(y = average_in, annotation_text = f"Average In: {average_in:,.2f}", line_dash="dash", line_color="green")
+
+        line_figure = line_figure.add_hline(y = average_out, annotation_text = f"Average Out: {average_out:,.2f}", line_dash="dash", line_color="red")
+
     transactions = df[df['month'] == selected_month]
     # Format columns for display
     transactions_display = transactions.copy()
-    transactions_display['date'] = transactions_display['date'].dt.strftime('%Y-%m-%d')
+    transactions_display['date'] = pd.to_datetime(transactions_display['date']).dt.strftime('%Y-%m-%d')
 
 
     # Table
@@ -203,6 +197,7 @@ def update_chart(selected_month, num_months, selected_category):
         style_table={'overflowX': 'auto'},
         style_cell={'textAlign': 'left'},
         sort_action='native',
+        filter_action='native',
     )
 
     return figure, line_figure, table, category_figure
