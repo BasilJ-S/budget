@@ -75,6 +75,15 @@ def build_shorthand_category_mapping(ruleset):
             
     return shorthands
 
+def list_categories(shorthands) -> None:
+    print("AVAILABLE CATEGORIES:")
+    for x in range(0, len(shorthands.keys()),3):
+        print("\t|\t".join([f"{k:<4}: {shorthands[k]:<15}" for k in list(shorthands.keys())[x:x+3]]))
+
+def build_shorthand_and_list(ruleset):
+    shorthands = build_shorthand_category_mapping(ruleset)
+    list_categories(shorthands)
+    return shorthands
 
 def categorize(df, ruleset):
 
@@ -92,10 +101,7 @@ def categorize(df, ruleset):
         amount = first_null['out'] if not pd.isna(first_null['out']) else -first_null['in'] # Positive for expense, negative for income
 
         # Show available categories
-        shorthands = build_shorthand_category_mapping(ruleset)
-        print("AVAILABLE CATEGORIES:")
-        for x in range(0, len(shorthands.keys()),3):
-            print("\t|\t".join([f"{k:<4}: {shorthands[k]:<15}" for k in list(shorthands.keys())[x:x+3]]))
+        shorthands = build_shorthand_and_list(ruleset)
 
         print(f"Uncategorized transaction\nDATE: {date}, DESC: {description}, AMOUNT: {amount}")
 
@@ -143,7 +149,14 @@ def save_ruleset_with_backup(ruleset):
 
 
     
-
+def load_ruleset():
+    try:
+        with open(f'{RULESET_PATH}rules.yaml', 'r') as f:
+            rules_dict = yaml.safe_load(f)
+            ruleset = Ruleset(rules=[Rule(**rule) for rule in rules_dict['rules']])
+    except FileNotFoundError:
+        ruleset = Ruleset(rules=[])
+    return ruleset
 
 
 if __name__ == "__main__":
@@ -151,12 +164,7 @@ if __name__ == "__main__":
     df = read_data()
 
     # Read existing rules (if any)
-    try:
-        with open(f'{RULESET_PATH}rules.yaml', 'r') as f:
-            rules_dict = yaml.safe_load(f)
-            ruleset = Ruleset(rules=[Rule(**rule) for rule in rules_dict['rules']])
-    except FileNotFoundError:
-        ruleset = Ruleset(rules=[])
+    ruleset = load_ruleset()
     print(build_shorthand_category_mapping(ruleset))
     # Apply rules
     df = df.sort_values(by='date', ascending=False)
