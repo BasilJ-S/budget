@@ -22,24 +22,16 @@ This project processes bank transaction data from checking and credit card accou
   - Filterable transaction tables
   - Average spending trend lines
 
-## Project Structure
-
-```
-budget/
-├── src/budget/
-│   ├── clean.py          # Data cleaning and categorization
-│   ├── plot.py           # Dash dashboard application
-│   ├── data/             # Transaction CSVs (gitignored)
-│   └── rulesets/         # Category rules (gitignored)
-├── tests/
-└── pyproject.toml        # Dependencies: pandas, dash, pyyaml
-```
+- **Budget Planning** (`budget.py` - in budget branch)
+  - Create and edit monthly budgets
+  - Assign budget amounts to categories
+  - Track budgeted vs. actual spending
 
 ## Setup
 
 ```bash
 # Install dependencies
-pip install -e .
+poetry install
 
 # Place your bank CSVs in src/budget/data/
 # - checking.csv (debit transactions)
