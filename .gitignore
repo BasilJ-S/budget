@@ -3,3 +3,4 @@ src/budget/rulesets/*
 src/budget/budgets/*
 
 __pycache__/
+.DS_Store
