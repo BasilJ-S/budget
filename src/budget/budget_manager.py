@@ -2,6 +2,7 @@ import datetime as dt
 import logging
 from dataclasses import asdict, dataclass, field
 
+import pandas as pd
 import yaml
 from dash.development.build_process import logger
 from numpy import isin
@@ -167,6 +168,65 @@ def edit_budget(budget: Budget, ruleset: Ruleset) -> Budget:
         write_budget(budget, filename=f"autosave_{budget.name}")
 
     return budget
+
+
+def evaluate_budget(
+    budget: Budget, transactions_df, money_in_col: str, money_out_col: str
+):
+    """Assume transactions_df with full date range we are interested in.
+    Returns DF with budgeted and actual amounts per category, with columns
+    'Category', 'Type', and 'Value'.
+    """
+    budget_data = pd.DataFrame(columns=["Category", "Type", "Value"])
+    for item in budget.items:
+        logger.info(f"Item: {item.categories}, Budgeted Amount: {item.budgeted_amount}")
+        category_data = transactions_df[
+            transactions_df["category"].isin(item.categories)
+        ]
+        actual_in = category_data[money_in_col].sum() if not category_data.empty else 0
+        actual_out = (
+            category_data[money_out_col].sum() if not category_data.empty else 0
+        )
+        actual = actual_out - actual_in
+        budget_data.loc[len(budget_data), :] = [
+            ", ".join(item.categories),
+            "budgeted",
+            item.budgeted_amount,
+        ]
+        budget_data.loc[len(budget_data), :] = [
+            ", ".join(item.categories),
+            "actual",
+            actual,
+        ]
+
+    ## Handle unbudgeted data ##
+    budgeted_categories = set([cat for item in budget.items for cat in item.categories])
+
+    # Gather unbudgeted transactions
+    unbudgeted_amount = transactions_df[
+        ~transactions_df["category"].isin(budgeted_categories)
+    ]
+    unbudgeted_out = (
+        unbudgeted_amount["total_out"].sum() if not unbudgeted_amount.empty else 0
+    )
+    unbudgeted_in = (
+        unbudgeted_amount["total_in"].sum() if not unbudgeted_amount.empty else 0
+    )
+    unbudgeted_amount = unbudgeted_out - unbudgeted_in
+
+    # Find how much of the total budget was not allocated to any category
+    total_budgeted = sum(item.budgeted_amount for item in budget.items)
+    unallocated_budget = budget.total_budgeted - total_budgeted
+
+    budget_data.loc[len(budget_data), :] = [
+        "Unbudgeted",
+        "budgeted",
+        unallocated_budget,
+    ]
+    budget_data.loc[len(budget_data), :] = ["Unbudgeted", "actual", unbudgeted_amount]
+    logger.info(f"BUDGET: {budget_data}")
+
+    return budget_data
 
 
 if __name__ == "__main__":

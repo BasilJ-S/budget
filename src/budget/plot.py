@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from dash import dash_table, dcc, html
 from dash.dependencies import Input, Output
 
-from budget.budget_manager import read_budget
+from budget.budget_manager import evaluate_budget, read_budget
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,29 +102,19 @@ app.layout = html.Div(
 )
 def update_chart(selected_month, num_months, selected_category):
 
-    # Aggregate by category and month for line plot
-    category_monthly = (
-        transactions_df.groupby(["month", "category"])
-        .agg(
-            total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
-            total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
-        )
-        .reset_index()
-    )
-
     # Filter for selected month
-    filtered_overall = monthly_summary[monthly_summary["month"] == selected_month]
-    filtered_with_category = category_monthly[
-        category_monthly["month"] == selected_month
+    selected_month_total_in_out = monthly_summary[
+        monthly_summary["month"] == selected_month
     ]
-    # Bar chart
+
+    # --- Total In Out Bar Chart ---
 
     data = pd.DataFrame(
         {
             "Type": ["Money In", "Money Out"],
             "Amount": [
-                filtered_overall["total_in"].values[0],
-                filtered_overall["total_out"].values[0],
+                selected_month_total_in_out["total_in"].values[0],
+                selected_month_total_in_out["total_out"].values[0],
             ],
         }
     )
@@ -140,13 +130,27 @@ def update_chart(selected_month, num_months, selected_category):
     )
     logger.info(f"Overall Sum: {data['Amount'].sum()}")
 
-    filtered_with_category = filtered_with_category.sort_values(
+    # --- Categorical In Out Bar Chart ---
+
+    # Aggregate by category and month for line plot
+    category_monthly = (
+        transactions_df.groupby(["month", "category"])
+        .agg(
+            total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
+            total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
+        )
+        .reset_index()
+    )
+    selected_month_categorical_in_out = category_monthly[
+        category_monthly["month"] == selected_month
+    ]
+
+    selected_month_categorical_in_out = selected_month_categorical_in_out.sort_values(
         by="total_out", ascending=False
     )
 
-    # Category bar chart
     category_figure = px.bar(
-        filtered_with_category,
+        selected_month_categorical_in_out,
         x="category",
         y=["total_in", "total_out"],
         barmode="group",
@@ -159,52 +163,10 @@ def update_chart(selected_month, num_months, selected_category):
     budget = read_budget("Student")
     logger.info(f"Budget: {budget}")
 
-    budget_data = pd.DataFrame(columns=["Category", "Type", "Value"])
-
-    for item in budget.items:
-        logger.info(f"Item: {item.categories}, Budgeted Amount: {item.budgeted_amount}")
-        category_data = filtered_with_category[
-            filtered_with_category["category"].isin(item.categories)
-        ]
-        actual_in = category_data["total_in"].sum() if not category_data.empty else 0
-        actual_out = category_data["total_out"].sum() if not category_data.empty else 0
-        actual = actual_out - actual_in
-        budget_data.loc[len(budget_data), :] = [
-            ", ".join(item.categories),
-            "budgeted",
-            item.budgeted_amount,
-        ]
-        budget_data.loc[len(budget_data), :] = [
-            ", ".join(item.categories),
-            "actual",
-            actual,
-        ]
-
-    logger.info(f"BUDGET: {budget_data}")
-
-    ## Handle unbudgeted data ##
-    unbudgeted_categories = set(
-        [cat for item in budget.items for cat in item.categories]
+    budget_data = evaluate_budget(
+        budget, selected_month_categorical_in_out, "total_in", "total_out"
     )
 
-    # Gather unbudgeted transactions
-    unbudgeted = filtered_with_category[
-        ~filtered_with_category["category"].isin(unbudgeted_categories)
-    ]
-    unbudgeted_out = unbudgeted["total_out"].sum() if not unbudgeted.empty else 0
-    unbudgeted_in = unbudgeted["total_in"].sum() if not unbudgeted.empty else 0
-    unbudgeted_amount = unbudgeted_out - unbudgeted_in
-
-    # Find how much of the total budget was not allocated to any category
-    total_budgeted = sum(item.budgeted_amount for item in budget.items)
-    unallocated_budget = budget.total_budgeted - total_budgeted
-
-    budget_data.loc[len(budget_data), :] = [
-        "Unbudgeted",
-        "budgeted",
-        unallocated_budget,
-    ]
-    budget_data.loc[len(budget_data), :] = ["Unbudgeted", "actual", unbudgeted_amount]
     logger.info(f"BUDGET: {budget_data}")
 
     budget_data = budget_data.sort_values(by=["Type", "Value"], ascending=[True, False])
