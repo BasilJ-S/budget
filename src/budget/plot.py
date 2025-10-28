@@ -31,16 +31,9 @@ transactions_df = transactions_df.rename(columns={"in": "money_in", "out": "mone
 # Add month column
 transactions_df["month"] = transactions_df["date"].dt.to_period("M").astype(str)
 
-# Aggregate monthly sums
-monthly_summary = (
-    transactions_df.groupby("month")
-    .agg(
-        total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
-        total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
-    )
-    .reset_index()
-)
-
+all_months = pd.period_range(
+    start=transactions_df["month"].min(), end=transactions_df["month"].max(), freq="M"
+).astype(str)
 
 # --- Dash App ---
 app = dash.Dash(__name__)
@@ -50,8 +43,8 @@ app.layout = html.Div(
         html.H1("Monthly Money Summary"),
         dcc.Dropdown(
             id="month-dropdown",
-            options=[{"label": m, "value": m} for m in monthly_summary["month"]],
-            value=monthly_summary["month"].iloc[-1],
+            options=[{"label": m, "value": m} for m in all_months],
+            value=all_months[-1],
             clearable=False,
         ),
         html.H2("Money In/Out for Selected Month"),
@@ -106,10 +99,13 @@ app.layout = html.Div(
 )
 def update_chart(selected_month, num_months, selected_category):
 
-    # Filter for selected month
-    selected_month_total_in_out = monthly_summary[
-        monthly_summary["month"] == selected_month
-    ]
+    # Aggregate monthly sums
+    monthly_summary = transactions_df.groupby("month").agg(
+        total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
+        total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
+    )
+    monthly_summary = monthly_summary.reset_index().set_index("month")
+    logger.info(f"Monthly Summary: {monthly_summary}")
 
     # --- Total In Out Bar Chart ---
 
@@ -117,8 +113,8 @@ def update_chart(selected_month, num_months, selected_category):
         {
             "Type": ["Money In", "Money Out"],
             "Amount": [
-                selected_month_total_in_out["total_in"].values[0],
-                selected_month_total_in_out["total_out"].values[0],
+                monthly_summary.loc[selected_month, "total_in"],
+                monthly_summary.loc[selected_month, "total_out"],
             ],
         }
     )
@@ -256,6 +252,8 @@ def update_chart(selected_month, num_months, selected_category):
         yaxis_title="Amount",
     )
 
+    # --- Cumulative Line Chart ---
+
     daily_transactions = (
         transactions_df.copy()
         .groupby("date")
@@ -291,6 +289,8 @@ def update_chart(selected_month, num_months, selected_category):
             "cumulative_rolling_avg": "lightblue",
         },
     )
+
+    # --- Monthly Summary Table ---
 
     transactions = transactions_df[transactions_df["month"] == selected_month]
     # Format columns for display
