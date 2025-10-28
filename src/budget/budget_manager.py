@@ -50,12 +50,9 @@ def save_budget(budget: Budget):
 
 def read_budget(budget_name: str):
     with open(f"{BUDGET_PATH}{budget_name}.yaml", "r") as f:
-        budget = Budget(**yaml.safe_load(f))
-        budget_items = []
-        for item in budget.items:
-            budget_items.append(BudgetItem(item.categories, item.budgeted_amount))
-        budget.items = budget_items
-
+        _data = yaml.safe_load(f)
+        budget = Budget(**_data)
+        budget.items = [BudgetItem(**item) for item in _data.get("items", [])]
         return budget
 
 
