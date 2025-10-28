@@ -75,8 +75,7 @@ app.layout = html.Div(
             options=[
                 {"label": cat, "value": cat}
                 for cat in transactions_df["category"].dropna().unique()
-            ]
-            + [{"label": "All", "value": "All"}],
+            ],
             value=None,
             clearable=True,
             multi=True,
@@ -159,7 +158,7 @@ def update_chart(selected_month, num_months, selected_category):
         color_discrete_map={"total_in": "green", "total_out": "red"},
     )
 
-    ### Budget vs Actuals ###
+    # --- Budget vs Actuals ---
     budget = read_budget("Student")
     logger.info(f"Budget: {budget}")
 
@@ -187,8 +186,8 @@ def update_chart(selected_month, num_months, selected_category):
 
     start_month = str(pd.Period(selected_month, freq="M") - (num_months - 1))
 
-    # line plot for previous 6 months
-    if selected_category and "All" not in selected_category:
+    # --- Budget vs Actuals ---
+    if selected_category:
         if isinstance(selected_category, str):
             selected_category = [selected_category]
 
