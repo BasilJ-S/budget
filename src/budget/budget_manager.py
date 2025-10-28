@@ -33,7 +33,7 @@ class BudgetItem:
     budgeted_amount: float
 
 
-def write_budget(budget: Budget, filename: str = None):
+def write_budget(budget: Budget, filename: str | None = None):
     if filename is None:
         filename = budget.name
     with open(f"{BUDGET_PATH}{filename}.yaml", "w") as f:
@@ -53,7 +53,7 @@ def read_budget(budget_name: str):
         budget = Budget(**yaml.safe_load(f))
         budget_items = []
         for item in budget.items:
-            budget_items.append(BudgetItem(**item))
+            budget_items.append(BudgetItem(item.categories, item.budgeted_amount))
         budget.items = budget_items
 
         return budget
