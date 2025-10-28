@@ -1,8 +1,18 @@
 import datetime as dt
+import logging
 from dataclasses import asdict, dataclass, field
 
 import yaml
-from clean import RULESET_PATH, Ruleset, build_shorthand_and_list, load_ruleset
+from dash.development.build_process import logger
+from numpy import isin
+
+from budget.clean import RULESET_PATH, Ruleset, build_shorthand_and_list, load_ruleset
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 BUDGET_PATH = "src/budget/budgets/"
 
@@ -19,7 +29,7 @@ class Budget:
 
 @dataclass
 class BudgetItem:
-    categories: str
+    categories: list[str]
     budgeted_amount: float
 
 
@@ -49,7 +59,7 @@ def read_budget(budget_name: str):
         return budget
 
 
-def list_budgets() -> None:
+def list_budgets() -> list[str]:
     import os
 
     files = os.listdir(BUDGET_PATH)
@@ -61,11 +71,15 @@ def list_budgets() -> None:
 
 def get_budget_item(ruleset: Ruleset) -> BudgetItem:
     shorthands = build_shorthand_and_list(ruleset)
-    categories = input("Enter category or categories (comma separated shorthands.: ")
-    categories = [shorthands.get(cat.strip().lower()) for cat in categories.split(",")]
+    categories = input("Enter category or categories (comma separated shorthands): ")
+    resolved_categories = [
+        str(shorthands.get(cat.strip().lower(), "")) for cat in categories.split(",")
+    ]
+    if "" in resolved_categories:
+        raise ValueError(f"Invalid category shorthand, {categories}.")
 
     amount = float(input("Enter budgeted amount: "))
-    item = BudgetItem(categories=categories, budgeted_amount=amount)
+    item = BudgetItem(categories=resolved_categories, budgeted_amount=amount)
     return item
 
 
@@ -99,24 +113,24 @@ def edit_budget_metadata(budget: Budget) -> Budget:
 
 def print_budget_items(budget: Budget):
     if len(budget.items) == 0:
-        print("No items in budget.")
+        logger.info("No items in budget.")
         return
 
-    print("Current items:")
+    logger.info("Current items:")
     budget_left = budget.total_budgeted - sum(
         item.budgeted_amount for item in budget.items
     )
-    print(
+    logger.info(
         f"Total budget: {budget.total_budgeted}, Total budgeted: {sum(item.budgeted_amount for item in budget.items)}, Budget left: {budget_left}"
     )
     for idx, item in enumerate(budget.items):
-        print(
+        logger.info(
             f"{idx + 1}. Categories: {item.categories}, Amount: {item.budgeted_amount}"
         )
 
 
 def edit_budget(budget: Budget, ruleset: Ruleset) -> Budget:
-    print(f"Editing budget: {budget.name}")
+    logger.info(f"Editing budget: {budget.name}")
     print_budget_items(budget)
 
     while True:
@@ -133,24 +147,24 @@ def edit_budget(budget: Budget, ruleset: Ruleset) -> Budget:
         elif action == "e":
             item_idx = int(input("Enter the item number to edit: ")) - 1
             if 0 <= item_idx < len(budget.items):
-                print(f"Editing item {item_idx + 1}")
+                logger.info(f"Editing item {item_idx + 1}")
                 budget.items[item_idx] = get_budget_item(ruleset)
             else:
-                print("Invalid item number.")
+                logger.info("Invalid item number.")
         elif action == "r":
             item_idx = int(input("Enter the item number to remove: ")) - 1
             if 0 <= item_idx < len(budget.items):
                 del budget.items[item_idx]
-                print("Item removed.")
+                logger.info("Item removed.")
             else:
-                print("Invalid item number.")
+                logger.info("Invalid item number.")
         elif action == "m":
             budget = edit_budget_metadata(budget)
 
         elif action == "done":
             break
         else:
-            print("Invalid action. Please enter 'a', 'e', 'r', or 'done'.")
+            logger.info("Invalid action. Please enter 'a', 'e', 'r', or 'done'.")
         budget.last_edited = dt.datetime.now()
         print_budget_items(budget)
         write_budget(budget, filename=f"autosave_{budget.name}")
@@ -171,16 +185,17 @@ if __name__ == "__main__":
     )
     if new_or_edit == "edit":
         budgets = list_budgets()
-        print("Available budgets:")
+        logger.info("Available budgets:")
         for idx, bname in enumerate(budgets):
-            print(f"{idx + 1}. {bname}")
+            logger.info(f"{idx + 1}. {bname}")
         choice = int(input("Enter the number of the budget to edit: ")) - 1
         if 0 <= choice < len(budgets):
             budget = read_budget(budgets[choice])
-            print(budget)
+            logger.info(f"Editing budget: {budget.name}")
             budget = edit_budget(budget, ruleset)
         else:
-            print("Invalid choice.")
+            logger.info("Invalid choice.")
+            exit(1)
     else:
         budget = build_budget(ruleset)
     save_budget(budget)

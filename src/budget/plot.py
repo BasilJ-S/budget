@@ -1,4 +1,5 @@
 import itertools
+import logging
 
 import dash
 import pandas as pd
@@ -7,8 +8,13 @@ import plotly.graph_objects as go
 from dash import dash_table, dcc, html
 from dash.dependencies import Input, Output
 
-from budget import read_budget
+from budget.budget_manager import read_budget
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 # Read the transactions CSV
 df = pd.read_csv("src/budget/data/transactions.csv")
 df["date"] = pd.to_datetime(df["date"])
@@ -124,7 +130,7 @@ def update_chart(selected_month, num_months, selected_category):
         color="Type",
         color_discrete_map={"Money In": "green", "Money Out": "red"},
     )
-    print("Overall Sum:", data["Amount"].sum())
+    logger.info(f"Overall Sum: {data['Amount'].sum()}")
 
     filtered_with_category = filtered_with_category.sort_values(
         by="total_out", ascending=False
@@ -143,12 +149,12 @@ def update_chart(selected_month, num_months, selected_category):
 
     ### Budget vs Actuals ###
     budget = read_budget("Student")
-    print(budget)
+    logger.info(f"Budget: {budget}")
 
     budget_data = pd.DataFrame(columns=["Category", "Type", "Value"])
 
     for item in budget.items:
-        print(item.categories, item.budgeted_amount)
+        logger.info(f"Item: {item.categories}, Budgeted Amount: {item.budgeted_amount}")
         category_data = filtered_with_category[
             filtered_with_category["category"].isin(item.categories)
         ]
@@ -166,7 +172,7 @@ def update_chart(selected_month, num_months, selected_category):
             actual,
         ]
 
-    print("BUDGET", budget_data)
+    logger.info(f"BUDGET: {budget_data}")
 
     ## Handle unbudgeted data ##
     unbudgeted_categories = set(
@@ -191,10 +197,12 @@ def update_chart(selected_month, num_months, selected_category):
         unallocated_budget,
     ]
     budget_data.loc[len(budget_data), :] = ["Unbudgeted", "actual", unbudgeted_amount]
-    print("BUDGET", budget_data)
+    logger.info(f"BUDGET: {budget_data}")
 
     budget_data = budget_data.sort_values(by=["Type", "Value"], ascending=[True, False])
-    print("Budget Sum:", budget_data[budget_data["Type"] == "actual"]["Value"].sum())
+    logger.info(
+        f"Budget Sum: {budget_data[budget_data['Type'] == 'actual']['Value'].sum()}"
+    )
 
     budget_bar_fig = px.bar(
         budget_data,
@@ -323,7 +331,7 @@ def update_chart(selected_month, num_months, selected_category):
         sort_action="native",
         filter_action="native",
     )
-    print("Update complete")
+    logger.info("Update complete")
 
     return figure, line_figure, table, category_figure, budget_bar_fig
 

@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 from dataclasses import asdict, dataclass
 
 import numpy as np
@@ -7,6 +8,12 @@ import yaml
 
 RULESET_PATH = "src/budget/rulesets/"
 DATA_PATH = "src/budget/data/"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(filename)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -52,13 +59,10 @@ def apply_rules(df, ruleset):
 
             matches = df["description"].str.contains(rule.string_to_match, regex=False)
             if matches.sum() > 0:
-                print(
-                    matches.sum(),
-                    "matches for",
-                    rule.string_to_match,
-                    " -> ",
-                    rule.category,
+                logger.info(
+                    f"{matches.sum()} matches for {rule.string_to_match} -> {rule.category}"
                 )
+
                 df.loc[matches, "category"] = (
                     rule.category + ", " + df.loc[matches, "category"]
                 )
@@ -92,9 +96,9 @@ def build_shorthand_category_mapping(ruleset):
 
 
 def list_categories(shorthands) -> None:
-    print("AVAILABLE CATEGORIES:")
+    logger.info("AVAILABLE CATEGORIES:")
     for x in range(0, len(shorthands.keys()), 3):
-        print(
+        logger.info(
             "\t|\t".join(
                 [
                     f"{k:<4}: {shorthands[k]:<15}"
@@ -117,7 +121,7 @@ def categorize(df, ruleset):
     nulls = df["category"].isnull() + (df["category"] == "")
 
     while nulls.sum() > 0:
-        print(nulls.sum(), "uncategorized transactions remaining")
+        logger.info(f"{nulls.sum()} uncategorized transactions remaining")
 
         # Gather latest uncategorized transaction
         first_null = df[nulls].iloc[0]
@@ -130,7 +134,7 @@ def categorize(df, ruleset):
         # Show available categories
         shorthands = build_shorthand_and_list(ruleset)
 
-        print(
+        logger.info(
             f"Uncategorized transaction\nDATE: {date}, DESC: {description}, AMOUNT: {amount}"
         )
 
@@ -147,7 +151,7 @@ def categorize(df, ruleset):
         make_rule = input("Make a general rule? (default no) (y/n): ")
         if make_rule.lower() == "y" or make_rule.lower() == "yes":
             description = input("Enter string to match: ")
-            print(
+            logger.info(
                 f'Creating rule: If description contains "{description}", categorize as "{cat}"'
             )
 
@@ -158,8 +162,8 @@ def categorize(df, ruleset):
         # Check for multiple categories in any transaction i.e. overlapping rules
         multiple_categories = any(["," in c for c in df["category"].unique()])
         if multiple_categories:
-            print(
-                "ERROR: Some transactions have multiple categories assigned. This may lead to unexpected behavior."
+            logger.error(
+                "Some transactions have multiple categories assigned. This may lead to unexpected behavior."
             )
             break
 
@@ -199,7 +203,7 @@ if __name__ == "__main__":
 
     # Read existing rules (if any)
     ruleset = load_ruleset()
-    print(build_shorthand_category_mapping(ruleset))
+    logger.info(build_shorthand_category_mapping(ruleset))
     # Apply rules
     df = df.sort_values(by="date", ascending=False)
 
@@ -209,4 +213,6 @@ if __name__ == "__main__":
     df.to_csv(f"{DATA_PATH}transactions.csv", index=False)
 
     save_ruleset_with_backup(ruleset)
-    print(f"Saved cleaned categorized transactions to {DATA_PATH}transactions.csv")
+    logger.info(
+        f"Saved cleaned categorized transactions to {DATA_PATH}transactions.csv"
+    )
