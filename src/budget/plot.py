@@ -16,19 +16,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 # Read the transactions CSV
-df = pd.read_csv("src/budget/data/transactions.csv")
-df["date"] = pd.to_datetime(df["date"])
+transactions_df = pd.read_csv("src/budget/data/transactions.csv")
+transactions_df["date"] = pd.to_datetime(transactions_df["date"])
 
 # Make sure 'in' and 'out' columns exist
 # Rename for clarity
-df = df.rename(columns={"in": "money_in", "out": "money_out"})
+transactions_df = transactions_df.rename(columns={"in": "money_in", "out": "money_out"})
 
 # Add month column
-df["month"] = df["date"].dt.to_period("M").astype(str)
+transactions_df["month"] = transactions_df["date"].dt.to_period("M").astype(str)
 
 # Aggregate monthly sums
 monthly_summary = (
-    df.groupby("month")
+    transactions_df.groupby("month")
     .agg(
         total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
         total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
@@ -38,7 +38,7 @@ monthly_summary = (
 
 # Aggregate by category and month for line plot
 category_monthly = (
-    df.groupby(["month", "category"])
+    transactions_df.groupby(["month", "category"])
     .agg(
         total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
         total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
@@ -79,7 +79,8 @@ app.layout = html.Div(
         dcc.Dropdown(
             id="category-dropdown",
             options=[
-                {"label": cat, "value": cat} for cat in df["category"].dropna().unique()
+                {"label": cat, "value": cat}
+                for cat in transactions_df["category"].dropna().unique()
             ]
             + [{"label": "All", "value": "All"}],
             value=None,
@@ -87,6 +88,7 @@ app.layout = html.Div(
             multi=True,
         ),
         dcc.Graph(id="monthly-line-chart"),
+        dcc.Graph(id="daily-total-line-chart"),
         html.H2("Monthly Summary Table"),
         html.Div(id="monthly-summary-table"),
     ]
@@ -308,7 +310,7 @@ def update_chart(selected_month, num_months, selected_category):
             line_color="red",
         )
 
-    transactions = df[df["month"] == selected_month]
+    transactions = transactions_df[transactions_df["month"] == selected_month]
     # Format columns for display
     transactions_display = transactions.copy()
     transactions_display["date"] = pd.to_datetime(
