@@ -35,6 +35,8 @@ all_months = pd.period_range(
     start=transactions_df["month"].min(), end=transactions_df["month"].max(), freq="M"
 ).astype(str)
 
+all_categories = transactions_df["category"].dropna().unique()
+
 # --- Dash App ---
 app = dash.Dash(__name__)
 
@@ -69,10 +71,7 @@ app.layout = html.Div(
             id="category-dropdown",
             options=[
                 {"label": "All", "value": "All"},
-                *(
-                    {"label": str(cat), "value": str(cat)}
-                    for cat in transactions_df["category"].dropna().unique()
-                ),
+                *({"label": str(cat), "value": str(cat)} for cat in all_categories),
             ],
             value="All",
             clearable=True,
@@ -292,15 +291,16 @@ def update_chart(selected_month, num_months, selected_category):
 
     # --- Monthly Summary Table ---
 
-    transactions = transactions_df[transactions_df["month"] == selected_month]
+    monthly_transactions = transactions_df[
+        transactions_df["month"] == selected_month
+    ].copy()
     # Format columns for display
-    transactions_display = transactions.copy()
-    transactions_display["date"] = pd.to_datetime(
-        transactions_display["date"]
+
+    monthly_transactions["date"] = pd.to_datetime(
+        monthly_transactions["date"]
     ).dt.strftime("%Y-%m-%d")
 
     # Table
-
     table = dash_table.DataTable(
         columns=[
             {"name": "Date", "id": "date"},
@@ -309,7 +309,7 @@ def update_chart(selected_month, num_months, selected_category):
             {"name": "Money In", "id": "money_in"},
             {"name": "Money Out", "id": "money_out"},
         ],
-        data=transactions_display.to_dict("records"),
+        data=monthly_transactions.to_dict("records"),
         style_table={"overflowX": "auto"},
         style_cell={"textAlign": "left"},
         sort_action="native",
