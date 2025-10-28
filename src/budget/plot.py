@@ -16,19 +16,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 # Read the transactions CSV
-df = pd.read_csv("src/budget/data/transactions.csv")
-df["date"] = pd.to_datetime(df["date"])
+transactions_df = pd.read_csv("src/budget/data/transactions.csv")
+transactions_df["date"] = pd.to_datetime(transactions_df["date"])
 
 # Make sure 'in' and 'out' columns exist
 # Rename for clarity
-df = df.rename(columns={"in": "money_in", "out": "money_out"})
+transactions_df = transactions_df.rename(columns={"in": "money_in", "out": "money_out"})
 
 # Add month column
-df["month"] = df["date"].dt.to_period("M").astype(str)
+transactions_df["month"] = transactions_df["date"].dt.to_period("M").astype(str)
 
 # Aggregate monthly sums
 monthly_summary = (
-    df.groupby("month")
+    transactions_df.groupby("month")
     .agg(
         total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
         total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
@@ -38,7 +38,7 @@ monthly_summary = (
 
 # Aggregate by category and month for line plot
 category_monthly = (
-    df.groupby(["month", "category"])
+    transactions_df.groupby(["month", "category"])
     .agg(
         total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
         total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
@@ -79,7 +79,8 @@ app.layout = html.Div(
         dcc.Dropdown(
             id="category-dropdown",
             options=[
-                {"label": cat, "value": cat} for cat in df["category"].dropna().unique()
+                {"label": cat, "value": cat}
+                for cat in transactions_df["category"].dropna().unique()
             ]
             + [{"label": "All", "value": "All"}],
             value=None,
@@ -87,6 +88,7 @@ app.layout = html.Div(
             multi=True,
         ),
         dcc.Graph(id="monthly-line-chart"),
+        dcc.Graph(id="cumulative-line-chart"),
         html.H2("Monthly Summary Table"),
         html.Div(id="monthly-summary-table"),
     ]
@@ -99,6 +101,7 @@ app.layout = html.Div(
     Output("monthly-summary-table", "children"),
     Output("monthly-category-chart", "figure"),
     Output("monthly-budget-chart", "figure"),
+    Output("cumulative-line-chart", "figure"),
     Input("month-dropdown", "value"),
     Input("num-months-dropdown", "value"),
     Input("category-dropdown", "value"),
@@ -308,7 +311,43 @@ def update_chart(selected_month, num_months, selected_category):
             line_color="red",
         )
 
-    transactions = df[df["month"] == selected_month]
+    daily_transactions = (
+        transactions_df.copy()
+        .groupby("date")
+        .agg(
+            total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
+            total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
+        )
+        .reset_index()
+    )
+    end_date = pd.Period(selected_month, freq="M").end_time
+    daily_transactions["net"] = (
+        daily_transactions["total_in"] - daily_transactions["total_out"]
+    )
+
+    daily_cumulative = daily_transactions.sort_values(by="date").copy()
+    daily_cumulative["cumulative"] = daily_cumulative["net"].cumsum()
+    daily_cumulative["cumulative_rolling_avg"] = (
+        daily_cumulative["cumulative"].rolling(window=20, center=True).mean()
+    )
+    daily_cumulative = daily_cumulative[
+        (daily_cumulative["date"] >= pd.to_datetime(start_month + "-01"))
+        & (daily_cumulative["date"] <= end_date)
+    ]
+
+    cumulative_line_figure = px.line(
+        daily_cumulative,
+        x="date",
+        y=["cumulative", "cumulative_rolling_avg"],
+        title=f"Cumulative Money for Last {num_months} Months up to {selected_month}",
+        labels={"value": "Amount", "month": "Month"},
+        color_discrete_map={
+            "cumulative": "blue",
+            "cumulative_rolling_avg": "lightblue",
+        },
+    )
+
+    transactions = transactions_df[transactions_df["month"] == selected_month]
     # Format columns for display
     transactions_display = transactions.copy()
     transactions_display["date"] = pd.to_datetime(
@@ -333,7 +372,14 @@ def update_chart(selected_month, num_months, selected_category):
     )
     logger.info("Update complete")
 
-    return figure, line_figure, table, category_figure, budget_bar_fig
+    return (
+        figure,
+        line_figure,
+        table,
+        category_figure,
+        budget_bar_fig,
+        cumulative_line_figure,
+    )
 
 
 if __name__ == "__main__":
