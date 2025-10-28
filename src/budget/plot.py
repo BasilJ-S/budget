@@ -1,5 +1,6 @@
 import itertools
 import logging
+from tokenize import group
 
 import dash
 import pandas as pd
@@ -7,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import dash_table, dcc, html
 from dash.dependencies import Input, Output
+from matplotlib import use
 
 from budget.budget_manager import evaluate_budget, read_budget
 
@@ -73,10 +75,13 @@ app.layout = html.Div(
         dcc.Dropdown(
             id="category-dropdown",
             options=[
-                {"label": cat, "value": cat}
-                for cat in transactions_df["category"].dropna().unique()
+                {"label": "All", "value": "All"},
+                *(
+                    {"label": str(cat), "value": str(cat)}
+                    for cat in transactions_df["category"].dropna().unique()
+                ),
             ],
-            value=None,
+            value="All",
             clearable=True,
             multi=True,
         ),
@@ -186,96 +191,70 @@ def update_chart(selected_month, num_months, selected_category):
 
     start_month = str(pd.Period(selected_month, freq="M") - (num_months - 1))
 
-    # --- Budget vs Actuals ---
-    if selected_category:
-        if isinstance(selected_category, str):
-            selected_category = [selected_category]
+    # --- Line Chart of In/Out ---
+    if isinstance(selected_category, str):
+        selected_category = [selected_category]
 
-        filtered_category_monthly = category_monthly[
-            category_monthly["category"].isin(selected_category)
-        ]
-        prev_months = filtered_category_monthly[
-            (filtered_category_monthly["month"] >= start_month)
-            & (filtered_category_monthly["month"] <= selected_month)
-        ]
+    prev_months = category_monthly[
+        (category_monthly["month"] >= start_month)
+        & (category_monthly["month"] <= selected_month)
+    ]
 
-        categories = prev_months["category"].unique()
+    line_figure = go.Figure()
 
-        line_figure = go.Figure()
+    color_palette = px.colors.qualitative.Plotly
+    color_cycle = itertools.cycle(color_palette)
+    category_colors = {cat: next(color_cycle) for cat in selected_category}
 
-        color_palette = px.colors.qualitative.Plotly
-        color_cycle = itertools.cycle(color_palette)
-        category_colors = {cat: next(color_cycle) for cat in categories}
-
-        for cat in categories:
-            cat_data = prev_months[prev_months["category"] == cat]
-            # add 0 for months with no data
-            all_months = pd.period_range(
-                start=start_month, end=selected_month, freq="M"
-            ).astype(str)
+    for cat in selected_category:
+        if cat == "All":
             cat_data = (
-                cat_data.set_index("month")
-                .reindex(all_months, fill_value=0)
+                prev_months.groupby("month")
+                .agg(
+                    total_in=pd.NamedAgg(column="total_in", aggfunc="sum"),
+                    total_out=pd.NamedAgg(column="total_out", aggfunc="sum"),
+                )
                 .reset_index()
-                .rename(columns={"index": "month"})
             )
-            # Money In: solid line
-            line_figure.add_trace(
-                go.Scatter(
-                    x=cat_data["month"],
-                    y=cat_data["total_in"],
-                    mode="lines",
-                    name=f"{cat} In",
-                    line=dict(color=category_colors[cat], dash="dash"),
-                )
+        else:
+            cat_data = prev_months[prev_months["category"] == cat]
+        logger.info(f"Category Data for {cat}: {cat_data}")
+        # add 0 for months with no data
+        all_months = pd.period_range(
+            start=start_month, end=selected_month, freq="M"
+        ).astype(str)
+        cat_data = (
+            cat_data.set_index("month")
+            .reindex(all_months, fill_value=0)
+            .reset_index()
+            .rename(columns={"index": "month"})
+        )
+        # Money In: solid line
+        line_figure.add_trace(
+            go.Scatter(
+                x=cat_data["month"],
+                y=cat_data["total_in"],
+                mode="lines",
+                name=f"{cat} In",
+                line=dict(color=category_colors[cat], dash="dash"),
             )
-            # Money Out: dashed line
-            line_figure.add_trace(
-                go.Scatter(
-                    x=cat_data["month"],
-                    y=cat_data["total_out"],
-                    mode="lines",
-                    name=f"{cat} Out",
-                    line=dict(color=category_colors[cat], dash="solid"),
-                )
+        )
+        # Money Out: dashed line
+        line_figure.add_trace(
+            go.Scatter(
+                x=cat_data["month"],
+                y=cat_data["total_out"],
+                mode="lines",
+                name=f"{cat} Out",
+                line=dict(color=category_colors[cat], dash="solid"),
             )
-
-        line_figure.update_layout(
-            title=f"Money In/Out By Category for Last {num_months} Months up to {selected_month}",
-            xaxis_title="Month",
-            yaxis_title="Amount",
         )
 
-    else:
-        prev_months = monthly_summary[
-            (monthly_summary["month"] >= start_month)
-            & (monthly_summary["month"] <= selected_month)
-        ]
-        average_in = prev_months["total_in"].mean()
-        average_out = prev_months["total_out"].mean()
-
-        line_figure = px.line(
-            prev_months,
-            x="month",
-            y=["total_in", "total_out"],
-            title=f"Money In/Out for Last {num_months} Months up to {selected_month}",
-            labels={"value": "Amount", "month": "Month"},
-            color_discrete_map={"total_in": "green", "total_out": "red"},
-        )
-
-        line_figure = line_figure.add_hline(
-            y=average_in,
-            annotation_text=f"Average In: {average_in:,.2f}",
-            line_dash="dash",
-            line_color="green",
-        )
-
-        line_figure = line_figure.add_hline(
-            y=average_out,
-            annotation_text=f"Average Out: {average_out:,.2f}",
-            line_dash="dash",
-            line_color="red",
-        )
+    line_figure.update_layout(
+        title=f"Money In/Out By Category for Last {num_months} Months up to {selected_month}",
+        xaxis_title="Month",
+        yaxis_title="Amount",
+    )
 
     daily_transactions = (
         transactions_df.copy()
