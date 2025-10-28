@@ -15,6 +15,9 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(filename)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# -- Data Preparation --
+
 # Read the transactions CSV
 transactions_df = pd.read_csv("src/budget/data/transactions.csv")
 transactions_df["date"] = pd.to_datetime(transactions_df["date"])
@@ -36,15 +39,6 @@ monthly_summary = (
     .reset_index()
 )
 
-# Aggregate by category and month for line plot
-category_monthly = (
-    transactions_df.groupby(["month", "category"])
-    .agg(
-        total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
-        total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
-    )
-    .reset_index()
-)
 
 # --- Dash App ---
 app = dash.Dash(__name__)
@@ -107,6 +101,17 @@ app.layout = html.Div(
     Input("category-dropdown", "value"),
 )
 def update_chart(selected_month, num_months, selected_category):
+
+    # Aggregate by category and month for line plot
+    category_monthly = (
+        transactions_df.groupby(["month", "category"])
+        .agg(
+            total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
+            total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
+        )
+        .reset_index()
+    )
+
     # Filter for selected month
     filtered_overall = monthly_summary[monthly_summary["month"] == selected_month]
     filtered_with_category = category_monthly[
