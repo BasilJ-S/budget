@@ -63,7 +63,7 @@ app.layout = html.Div(
         dcc.Graph(id="monthly-budget-chart"),
         dcc.Dropdown(
             id="num-months-dropdown",
-            options=[{"label": m, "value": m} for m in range(1, 64)],
+            options=[{"label": m, "value": m} for m in range(1, len(all_months) + 1)],
             value=6,
             clearable=False,
         ),
