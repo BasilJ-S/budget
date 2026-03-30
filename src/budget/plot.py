@@ -1,5 +1,6 @@
 import itertools
 import logging
+from tokenize import group
 
 import dash
 import pandas as pd
@@ -7,14 +8,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import dash_table, dcc, html
 from dash.dependencies import Input, Output
+from matplotlib import use
 
-from budget.budget_manager import read_budget
+from budget.budget_manager import evaluate_budget, read_budget
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(filename)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+# -- Data Preparation --
+
 # Read the transactions CSV
 transactions_df = pd.read_csv("src/budget/data/transactions.csv")
 transactions_df["date"] = pd.to_datetime(transactions_df["date"])
@@ -26,25 +31,11 @@ transactions_df = transactions_df.rename(columns={"in": "money_in", "out": "mone
 # Add month column
 transactions_df["month"] = transactions_df["date"].dt.to_period("M").astype(str)
 
-# Aggregate monthly sums
-monthly_summary = (
-    transactions_df.groupby("month")
-    .agg(
-        total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
-        total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
-    )
-    .reset_index()
-)
+all_months = pd.period_range(
+    start=transactions_df["month"].min(), end=transactions_df["month"].max(), freq="M"
+).astype(str)
 
-# Aggregate by category and month for line plot
-category_monthly = (
-    transactions_df.groupby(["month", "category"])
-    .agg(
-        total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
-        total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
-    )
-    .reset_index()
-)
+all_categories = transactions_df["category"].dropna().unique()
 
 # --- Dash App ---
 app = dash.Dash(__name__)
@@ -54,8 +45,8 @@ app.layout = html.Div(
         html.H1("Monthly Money Summary"),
         dcc.Dropdown(
             id="month-dropdown",
-            options=[{"label": m, "value": m} for m in monthly_summary["month"]],
-            value=monthly_summary["month"].iloc[-1],
+            options=[{"label": m, "value": m} for m in all_months],
+            value=all_months[-1],
             clearable=False,
         ),
         html.H2("Money In/Out for Selected Month"),
@@ -72,18 +63,17 @@ app.layout = html.Div(
         dcc.Graph(id="monthly-budget-chart"),
         dcc.Dropdown(
             id="num-months-dropdown",
-            options=[{"label": m, "value": m} for m in range(1, 64)],
+            options=[{"label": m, "value": m} for m in range(1, len(all_months) + 1)],
             value=6,
             clearable=False,
         ),
         dcc.Dropdown(
             id="category-dropdown",
             options=[
-                {"label": cat, "value": cat}
-                for cat in transactions_df["category"].dropna().unique()
-            ]
-            + [{"label": "All", "value": "All"}],
-            value=None,
+                {"label": "All", "value": "All"},
+                *({"label": str(cat), "value": str(cat)} for cat in all_categories),
+            ],
+            value="All",
             clearable=True,
             multi=True,
         ),
@@ -107,19 +97,23 @@ app.layout = html.Div(
     Input("category-dropdown", "value"),
 )
 def update_chart(selected_month, num_months, selected_category):
-    # Filter for selected month
-    filtered_overall = monthly_summary[monthly_summary["month"] == selected_month]
-    filtered_with_category = category_monthly[
-        category_monthly["month"] == selected_month
-    ]
-    # Bar chart
+
+    # Aggregate monthly sums
+    monthly_summary = transactions_df.groupby("month").agg(
+        total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
+        total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
+    )
+    monthly_summary = monthly_summary.reset_index().set_index("month")
+    logger.info(f"Monthly Summary: {monthly_summary}")
+
+    # --- Total In Out Bar Chart ---
 
     data = pd.DataFrame(
         {
             "Type": ["Money In", "Money Out"],
             "Amount": [
-                filtered_overall["total_in"].values[0],
-                filtered_overall["total_out"].values[0],
+                monthly_summary.loc[selected_month, "total_in"],
+                monthly_summary.loc[selected_month, "total_out"],
             ],
         }
     )
@@ -135,13 +129,27 @@ def update_chart(selected_month, num_months, selected_category):
     )
     logger.info(f"Overall Sum: {data['Amount'].sum()}")
 
-    filtered_with_category = filtered_with_category.sort_values(
+    # --- Categorical In Out Bar Chart ---
+
+    # Aggregate by category and month for line plot
+    category_monthly = (
+        transactions_df.groupby(["month", "category"])
+        .agg(
+            total_in=pd.NamedAgg(column="money_in", aggfunc="sum"),
+            total_out=pd.NamedAgg(column="money_out", aggfunc="sum"),
+        )
+        .reset_index()
+    )
+    selected_month_categorical_in_out = category_monthly[
+        category_monthly["month"] == selected_month
+    ]
+
+    selected_month_categorical_in_out = selected_month_categorical_in_out.sort_values(
         by="total_out", ascending=False
     )
 
-    # Category bar chart
     category_figure = px.bar(
-        filtered_with_category,
+        selected_month_categorical_in_out,
         x="category",
         y=["total_in", "total_out"],
         barmode="group",
@@ -150,56 +158,14 @@ def update_chart(selected_month, num_months, selected_category):
         color_discrete_map={"total_in": "green", "total_out": "red"},
     )
 
-    ### Budget vs Actuals ###
+    # --- Budget vs Actuals ---
     budget = read_budget("Student")
     logger.info(f"Budget: {budget}")
 
-    budget_data = pd.DataFrame(columns=["Category", "Type", "Value"])
-
-    for item in budget.items:
-        logger.info(f"Item: {item.categories}, Budgeted Amount: {item.budgeted_amount}")
-        category_data = filtered_with_category[
-            filtered_with_category["category"].isin(item.categories)
-        ]
-        actual_in = category_data["total_in"].sum() if not category_data.empty else 0
-        actual_out = category_data["total_out"].sum() if not category_data.empty else 0
-        actual = actual_out - actual_in
-        budget_data.loc[len(budget_data), :] = [
-            ", ".join(item.categories),
-            "budgeted",
-            item.budgeted_amount,
-        ]
-        budget_data.loc[len(budget_data), :] = [
-            ", ".join(item.categories),
-            "actual",
-            actual,
-        ]
-
-    logger.info(f"BUDGET: {budget_data}")
-
-    ## Handle unbudgeted data ##
-    unbudgeted_categories = set(
-        [cat for item in budget.items for cat in item.categories]
+    budget_data = evaluate_budget(
+        budget, selected_month_categorical_in_out, "total_in", "total_out"
     )
 
-    # Gather unbudgeted transactions
-    unbudgeted = filtered_with_category[
-        ~filtered_with_category["category"].isin(unbudgeted_categories)
-    ]
-    unbudgeted_out = unbudgeted["total_out"].sum() if not unbudgeted.empty else 0
-    unbudgeted_in = unbudgeted["total_in"].sum() if not unbudgeted.empty else 0
-    unbudgeted_amount = unbudgeted_out - unbudgeted_in
-
-    # Find how much of the total budget was not allocated to any category
-    total_budgeted = sum(item.budgeted_amount for item in budget.items)
-    unallocated_budget = budget.total_budgeted - total_budgeted
-
-    budget_data.loc[len(budget_data), :] = [
-        "Unbudgeted",
-        "budgeted",
-        unallocated_budget,
-    ]
-    budget_data.loc[len(budget_data), :] = ["Unbudgeted", "actual", unbudgeted_amount]
     logger.info(f"BUDGET: {budget_data}")
 
     budget_data = budget_data.sort_values(by=["Type", "Value"], ascending=[True, False])
@@ -220,96 +186,72 @@ def update_chart(selected_month, num_months, selected_category):
 
     start_month = str(pd.Period(selected_month, freq="M") - (num_months - 1))
 
-    # line plot for previous 6 months
-    if selected_category and "All" not in selected_category:
-        if isinstance(selected_category, str):
-            selected_category = [selected_category]
+    # --- Line Chart of In/Out ---
+    if isinstance(selected_category, str):
+        selected_category = [selected_category]
 
-        filtered_category_monthly = category_monthly[
-            category_monthly["category"].isin(selected_category)
-        ]
-        prev_months = filtered_category_monthly[
-            (filtered_category_monthly["month"] >= start_month)
-            & (filtered_category_monthly["month"] <= selected_month)
-        ]
+    prev_months = category_monthly[
+        (category_monthly["month"] >= start_month)
+        & (category_monthly["month"] <= selected_month)
+    ]
 
-        categories = prev_months["category"].unique()
+    line_figure = go.Figure()
 
-        line_figure = go.Figure()
+    color_palette = px.colors.qualitative.Plotly
+    color_cycle = itertools.cycle(color_palette)
+    category_colors = {cat: next(color_cycle) for cat in selected_category}
 
-        color_palette = px.colors.qualitative.Plotly
-        color_cycle = itertools.cycle(color_palette)
-        category_colors = {cat: next(color_cycle) for cat in categories}
-
-        for cat in categories:
-            cat_data = prev_months[prev_months["category"] == cat]
-            # add 0 for months with no data
-            all_months = pd.period_range(
-                start=start_month, end=selected_month, freq="M"
-            ).astype(str)
+    for cat in selected_category:
+        if cat == "All":
             cat_data = (
-                cat_data.set_index("month")
-                .reindex(all_months, fill_value=0)
+                prev_months.groupby("month")
+                .agg(
+                    total_in=pd.NamedAgg(column="total_in", aggfunc="sum"),
+                    total_out=pd.NamedAgg(column="total_out", aggfunc="sum"),
+                )
                 .reset_index()
-                .rename(columns={"index": "month"})
             )
-            # Money In: solid line
-            line_figure.add_trace(
-                go.Scatter(
-                    x=cat_data["month"],
-                    y=cat_data["total_in"],
-                    mode="lines",
-                    name=f"{cat} In",
-                    line=dict(color=category_colors[cat], dash="dash"),
-                )
+        else:
+            cat_data = prev_months[prev_months["category"] == cat]
+        logger.info(f"Category Data for {cat}: {cat_data}")
+        # add 0 for months with no data
+        all_months = pd.period_range(
+            start=start_month, end=selected_month, freq="M"
+        ).astype(str)
+        cat_data = (
+            cat_data.set_index("month")
+            .reindex(all_months, fill_value=0)
+            .reset_index()
+            .rename(columns={"index": "month"})
+        )
+        # Money In: solid line
+        line_figure.add_trace(
+            go.Scatter(
+                x=cat_data["month"],
+                y=cat_data["total_in"],
+                mode="lines",
+                name=f"{cat} In",
+                line=dict(color=category_colors[cat], dash="dash"),
             )
-            # Money Out: dashed line
-            line_figure.add_trace(
-                go.Scatter(
-                    x=cat_data["month"],
-                    y=cat_data["total_out"],
-                    mode="lines",
-                    name=f"{cat} Out",
-                    line=dict(color=category_colors[cat], dash="solid"),
-                )
+        )
+        # Money Out: dashed line
+        line_figure.add_trace(
+            go.Scatter(
+                x=cat_data["month"],
+                y=cat_data["total_out"],
+                mode="lines",
+                name=f"{cat} Out",
+                line=dict(color=category_colors[cat], dash="solid"),
             )
-
-        line_figure.update_layout(
-            title=f"Money In/Out By Category for Last {num_months} Months up to {selected_month}",
-            xaxis_title="Month",
-            yaxis_title="Amount",
         )
 
-    else:
-        prev_months = monthly_summary[
-            (monthly_summary["month"] >= start_month)
-            & (monthly_summary["month"] <= selected_month)
-        ]
-        average_in = prev_months["total_in"].mean()
-        average_out = prev_months["total_out"].mean()
+    line_figure.update_layout(
+        title=f"Money In/Out By Category for Last {num_months} Months up to {selected_month}",
+        xaxis_title="Month",
+        yaxis_title="Amount",
+    )
 
-        line_figure = px.line(
-            prev_months,
-            x="month",
-            y=["total_in", "total_out"],
-            title=f"Money In/Out for Last {num_months} Months up to {selected_month}",
-            labels={"value": "Amount", "month": "Month"},
-            color_discrete_map={"total_in": "green", "total_out": "red"},
-        )
-
-        line_figure = line_figure.add_hline(
-            y=average_in,
-            annotation_text=f"Average In: {average_in:,.2f}",
-            line_dash="dash",
-            line_color="green",
-        )
-
-        line_figure = line_figure.add_hline(
-            y=average_out,
-            annotation_text=f"Average Out: {average_out:,.2f}",
-            line_dash="dash",
-            line_color="red",
-        )
+    # --- Cumulative Line Chart ---
 
     daily_transactions = (
         transactions_df.copy()
@@ -347,15 +289,18 @@ def update_chart(selected_month, num_months, selected_category):
         },
     )
 
-    transactions = transactions_df[transactions_df["month"] == selected_month]
+    # --- Monthly Summary Table ---
+
+    monthly_transactions = transactions_df[
+        transactions_df["month"] == selected_month
+    ].copy()
     # Format columns for display
-    transactions_display = transactions.copy()
-    transactions_display["date"] = pd.to_datetime(
-        transactions_display["date"]
+
+    monthly_transactions["date"] = pd.to_datetime(
+        monthly_transactions["date"]
     ).dt.strftime("%Y-%m-%d")
 
     # Table
-
     table = dash_table.DataTable(
         columns=[
             {"name": "Date", "id": "date"},
@@ -364,7 +309,7 @@ def update_chart(selected_month, num_months, selected_category):
             {"name": "Money In", "id": "money_in"},
             {"name": "Money Out", "id": "money_out"},
         ],
-        data=transactions_display.to_dict("records"),
+        data=monthly_transactions.to_dict("records"),
         style_table={"overflowX": "auto"},
         style_cell={"textAlign": "left"},
         sort_action="native",

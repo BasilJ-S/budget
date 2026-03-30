@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class Rule:
     string_to_match: str
     keep: bool = True
-    category: str = None
+    category: str | None = None
 
 
 @dataclass
@@ -29,7 +29,7 @@ class Ruleset:
 
 
 def read_data():
-    debit = pd.read_csv(f"{DATA_PATH}checking.csv")
+    debit = pd.read_csv(f"{DATA_PATH}chequing.csv")
     credit = pd.read_csv(f"{DATA_PATH}visa.csv")
     savings = pd.read_csv(f"{DATA_PATH}savings.csv")
     # drop last column
@@ -52,17 +52,14 @@ def apply_rules(df, ruleset):
 
     # Apply row removals
     for rule in ruleset.rules:
-        if not rule.keep:
-            df = df[~df["description"].str.contains(rule.string_to_match, regex=False)]
-        if rule.category:
-            # Extend categories string to the assigned category
-
-            matches = df["description"].str.contains(rule.string_to_match, regex=False)
-            if matches.sum() > 0:
-                logger.info(
-                    f"{matches.sum()} matches for {rule.string_to_match} -> {rule.category}"
-                )
-
+        matches = df["description"].str.contains(rule.string_to_match, regex=False)
+        if matches.sum() > 0:
+            logger.info(
+                f"{matches.sum()} matches for {rule.string_to_match} -> {rule.category if rule.category else 'REMOVED'}"
+            )
+            if rule.keep is False:
+                df = df[~matches]
+            if rule.category and rule.keep is True:
                 df.loc[matches, "category"] = (
                     rule.category + ", " + df.loc[matches, "category"]
                 )
@@ -139,10 +136,12 @@ def categorize(df, ruleset):
         )
 
         # Collect input
-        user_cat = input("Enter shorthand, new category or EXIT to end session: ")
+        user_cat = input(
+            "Enter shorthand, new category, or REMOVE to remove from the final transactions list. Type 'EXIT' to end session: "
+        )
         if user_cat.upper() == "EXIT":
             break
-        if user_cat.lower() in shorthands:
+        elif user_cat.lower() in shorthands:
             cat = shorthands[user_cat.lower()]
         else:
             cat = user_cat
@@ -155,8 +154,18 @@ def categorize(df, ruleset):
                 f'Creating rule: If description contains "{description}", categorize as "{cat}"'
             )
 
-        # Add rule and re-apply ruleset
-        ruleset.rules.append(Rule(string_to_match=description, keep=True, category=cat))
+        if cat.upper() == "REMOVE":
+            logger.info(
+                f"Removing transactions with description containing {description}"
+            )
+            # Add rule
+            ruleset.rules.append(Rule(string_to_match=description, keep=False))
+        else:
+            # Add rule
+            ruleset.rules.append(
+                Rule(string_to_match=description, keep=True, category=cat)
+            )
+        # Re-apply rules
         df = apply_rules(df, ruleset)
 
         # Check for multiple categories in any transaction i.e. overlapping rules
