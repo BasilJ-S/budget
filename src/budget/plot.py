@@ -44,6 +44,7 @@ def fmt_month(period_str: str) -> str:
     """Convert '2024-01' to 'Jan 2024'."""
     return pd.Period(period_str, freq="M").strftime("%b %Y")
 
+
 CHART_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
@@ -51,7 +52,9 @@ CHART_LAYOUT = dict(
     margin=dict(l=40, r=20, t=48, b=40),
     legend=dict(bgcolor="rgba(0,0,0,0)", borderwidth=0),
     xaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)"),
-    yaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)", tickprefix="$"),
+    yaxis=dict(
+        gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)", tickprefix="$"
+    ),
 )
 
 LABEL_STYLE = {
@@ -71,13 +74,16 @@ app.layout = dbc.Container(
     children=[
         # Header
         dbc.Row(
-            dbc.Col([
-                html.H2("Budget Dashboard", className="mb-0 fw-bold"),
-                html.P("Personal Finance Overview", className="text-muted mt-1 mb-0"),
-            ]),
+            dbc.Col(
+                [
+                    html.H2("Budget Dashboard", className="mb-0 fw-bold"),
+                    html.P(
+                        "Personal Finance Overview", className="text-muted mt-1 mb-0"
+                    ),
+                ]
+            ),
             className="mb-4 mt-2",
         ),
-
         # Month control
         dbc.Row(
             dbc.Col(
@@ -85,7 +91,9 @@ app.layout = dbc.Container(
                     html.Label("Month", style=LABEL_STYLE),
                     dcc.Dropdown(
                         id="month-dropdown",
-                        options=[{"label": fmt_month(m), "value": m} for m in all_months],
+                        options=[
+                            {"label": fmt_month(m), "value": m} for m in all_months
+                        ],
                         value=all_months[-1],
                         clearable=False,
                     ),
@@ -94,13 +102,15 @@ app.layout = dbc.Container(
             ),
             className="mb-4",
         ),
-
         # KPI summary cards
         dbc.Row(
             id="kpi-row",
+            className="mb-3 g-3",
+        ),
+        dbc.Row(
+            id="income-kpi-row",
             className="mb-4 g-3",
         ),
-
         # Monthly snapshot — two side-by-side charts
         dbc.Row(
             [
@@ -126,7 +136,6 @@ app.layout = dbc.Container(
                 ),
             ]
         ),
-
         # Budget vs Actuals
         dbc.Row(
             dbc.Col(
@@ -139,7 +148,18 @@ app.layout = dbc.Container(
                 )
             )
         ),
-
+        # Month-over-Month Spending Change
+        dbc.Row(
+            dbc.Col(
+                dbc.Card(
+                    [
+                        dbc.CardHeader("Month-over-Month Spending Change"),
+                        dbc.CardBody(dcc.Graph(id="mom-change-chart")),
+                    ],
+                    className="mb-4 shadow-sm",
+                )
+            )
+        ),
         # Trends controls — apply to both charts below
         dbc.Row(
             [
@@ -180,7 +200,6 @@ app.layout = dbc.Container(
             ],
             className="mb-3 align-items-end",
         ),
-
         # Trends
         dbc.Row(
             dbc.Col(
@@ -193,7 +212,6 @@ app.layout = dbc.Container(
                 )
             )
         ),
-
         dbc.Row(
             dbc.Col(
                 dbc.Card(
@@ -205,7 +223,31 @@ app.layout = dbc.Container(
                 )
             )
         ),
-
+        # Day-of-week + compliance side by side
+        dbc.Row(
+            [
+                dbc.Col(
+                    dbc.Card(
+                        [
+                            dbc.CardHeader("Avg Daily Spending by Day of Week"),
+                            dbc.CardBody(dcc.Graph(id="dow-heatmap-chart")),
+                        ],
+                        className="mb-4 shadow-sm",
+                    ),
+                    md=6,
+                ),
+                dbc.Col(
+                    dbc.Card(
+                        [
+                            dbc.CardHeader("Budget Compliance History"),
+                            dbc.CardBody(dcc.Graph(id="compliance-heatmap-chart")),
+                        ],
+                        className="mb-4 shadow-sm",
+                    ),
+                    md=6,
+                ),
+            ]
+        ),
         # Transactions table
         dbc.Row(
             dbc.Col(
@@ -225,25 +267,32 @@ app.layout = dbc.Container(
 def _kpi_card(label: str, value: str, color: str = "#2c3e50") -> dbc.Col:
     return dbc.Col(
         dbc.Card(
-            dbc.CardBody([
-                html.P(label, style={**LABEL_STYLE, "marginBottom": "6px"}),
-                html.H4(value, className="mb-0 fw-bold", style={"color": color}),
-            ]),
+            dbc.CardBody(
+                [
+                    html.P(label, style={**LABEL_STYLE, "marginBottom": "6px"}),
+                    html.H4(value, className="mb-0 fw-bold", style={"color": color}),
+                ]
+            ),
             className="shadow-sm h-100",
             style={"borderTop": f"3px solid {color}"},
         ),
-        md=3, xs=6,
+        md=3,
+        xs=6,
     )
 
 
 @app.callback(
     Output("kpi-row", "children"),
+    Output("income-kpi-row", "children"),
     Output("monthly-bar-chart", "figure"),
     Output("monthly-line-chart", "figure"),
     Output("monthly-summary-table", "children"),
     Output("monthly-category-chart", "figure"),
     Output("monthly-budget-chart", "figure"),
+    Output("mom-change-chart", "figure"),
     Output("cumulative-line-chart", "figure"),
+    Output("dow-heatmap-chart", "figure"),
+    Output("compliance-heatmap-chart", "figure"),
     Input("month-dropdown", "value"),
     Input("num-months-dropdown", "value"),
     Input("category-dropdown", "value"),
@@ -258,6 +307,8 @@ def update_chart(selected_month, num_months, selected_category):
     monthly_summary = monthly_summary.reset_index().set_index("month")
     logger.info(f"Monthly Summary: {monthly_summary}")
 
+    budget = read_budget("Soma")
+
     # --- KPI Cards ---
     m_in = monthly_summary.loc[selected_month, "total_in"]
     m_out = monthly_summary.loc[selected_month, "total_out"]
@@ -265,8 +316,8 @@ def update_chart(selected_month, num_months, selected_category):
     # Month-over-month net change
     all_month_list = sorted(monthly_summary.index.tolist())
     prev_idx = all_month_list.index(selected_month) - 1
-    if prev_idx >= 0:
-        prev_month = all_month_list[prev_idx]
+    prev_month = all_month_list[prev_idx] if prev_idx >= 0 else None
+    if prev_month is not None:
         prev_out = monthly_summary.loc[prev_month, "total_out"]
         mom_delta = m_out - prev_out
         mom_sign = "+" if mom_delta >= 0 else ""
@@ -279,8 +330,8 @@ def update_chart(selected_month, num_months, selected_category):
     kpi_cards = [
         _kpi_card("Money In", f"${m_in:,.2f}", "#18bc9c"),
         _kpi_card("Money Out", f"${m_out:,.2f}", "#e74c3c"),
-        _kpi_card("Net", f"${m_net:,.2f}", "#18bc9c" if m_net >= 0 else "#e74c3c"),
-        _kpi_card("Spending vs Prior Month", mom_label, mom_color),
+        None,  # placeholder — budget card added after evaluate_budget
+        None,  # placeholder — budget remaining card added after evaluate_budget
     ]
 
     # --- Total In Out Bar Chart ---
@@ -338,7 +389,6 @@ def update_chart(selected_month, num_months, selected_category):
     category_figure.update_layout(**CHART_LAYOUT)
 
     # --- Budget vs Actuals ---
-    budget = read_budget("Student")
     logger.info(f"Budget: {budget}")
 
     budget_data = evaluate_budget(
@@ -348,8 +398,57 @@ def update_chart(selected_month, num_months, selected_category):
     logger.info(f"BUDGET: {budget_data}")
 
     budget_data = budget_data.sort_values(by=["Type", "Value"], ascending=[True, False])
-    logger.info(
-        f"Budget Sum: {budget_data[budget_data['Type'] == 'actual']['Value'].sum()}"
+
+    # Budget KPIs: only count expense items (income items like salary are excluded)
+    expense_data = budget_data[budget_data["ItemType"] == "expense"]
+    expense_budgeted = expense_data.loc[expense_data["Type"] == "budgeted", "Value"].sum()
+    expense_actual = expense_data.loc[expense_data["Type"] == "actual", "Value"].sum()
+    budget_remaining = expense_budgeted - expense_actual
+    kpi_cards[2] = _kpi_card("Budget", f"${expense_budgeted:,.2f}", "#2c3e50")
+    kpi_cards[3] = _kpi_card(
+        "Budget Remaining",
+        f"${budget_remaining:,.2f}",
+        "#18bc9c" if budget_remaining >= 0 else "#e74c3c",
+    )
+
+    # Income KPIs: income, expenses, net, savings rate
+    income_data = budget_data[budget_data["ItemType"] == "income"]
+    income_actual = income_data.loc[income_data["Type"] == "actual", "Value"].sum()
+    # income actuals are out - in, so actual income is the negative
+    actual_income = -income_actual
+    actual_net = actual_income - expense_actual
+    savings_rate = (actual_income - expense_actual) / actual_income * 100 if actual_income > 0 else 0
+    income_kpi_cards = [
+        _kpi_card("Income", f"${actual_income:,.2f}", "#18bc9c"),
+        _kpi_card("Expenses", f"${expense_actual:,.2f}", "#e74c3c"),
+        _kpi_card(
+            "Net",
+            f"${actual_net:,.2f}",
+            "#18bc9c" if actual_net >= 0 else "#e74c3c",
+        ),
+        _kpi_card(
+            "Savings Rate",
+            f"{savings_rate:.1f}%",
+            "#18bc9c" if savings_rate >= 0 else "#e74c3c",
+        ),
+    ]
+
+    # Exclude income items from the budget vs actuals chart
+    budget_data = budget_data[budget_data["ItemType"] == "expense"]
+
+    # Build per-category hover detail for the Unbudgeted bar
+    budgeted_cat_set = {cat for item in budget.items for cat in item.categories}
+    unbudgeted_rows = selected_month_categorical_in_out[
+        ~selected_month_categorical_in_out["category"].isin(budgeted_cat_set)
+    ].copy()
+    unbudgeted_rows["net"] = unbudgeted_rows["total_out"] - unbudgeted_rows["total_in"]
+    unbudgeted_rows = unbudgeted_rows.sort_values("net", ascending=False)
+    unbudgeted_detail = "".join(
+        f"<br>  {r['category']}: ${r['net']:,.2f}"
+        for _, r in unbudgeted_rows.iterrows()
+    )
+    budget_data["hover_extra"] = budget_data["Category"].apply(
+        lambda c: unbudgeted_detail if c == "Unbudgeted" else ""
     )
 
     budget_bar_fig = px.bar(
@@ -361,14 +460,21 @@ def update_chart(selected_month, num_months, selected_category):
         labels={"Value": "Amount ($)", "Category": "Category", "Type": ""},
         text=budget_data["Value"].apply(lambda v: f"${v:,.2f}"),
         color_discrete_map={"budget": "#95a5a6", "actual": "#e74c3c"},
+        custom_data=["hover_extra"],
     )
-    budget_bar_fig.update_traces(textposition="outside", marker_line_width=0)
+    budget_bar_fig.update_traces(
+        textposition="outside",
+        marker_line_width=0,
+        hovertemplate="<b>%{x}</b> — %{fullData.name}<br>$%{y:,.2f}%{customdata[0]}<extra></extra>",
+    )
     budget_bar_fig.update_layout(**CHART_LAYOUT)
 
     start_month = str(pd.Period(selected_month, freq="M") - (num_months - 1))
 
     # --- Line Chart of In/Out ---
-    if isinstance(selected_category, str):
+    if not selected_category:
+        selected_category = ["All"]
+    elif isinstance(selected_category, str):
         selected_category = [selected_category]
 
     prev_months = category_monthly[
@@ -382,7 +488,9 @@ def update_chart(selected_month, num_months, selected_category):
     color_cycle = itertools.cycle(color_palette)
     category_colors = {cat: next(color_cycle) for cat in selected_category}
 
-    window_months = pd.period_range(start=start_month, end=selected_month, freq="M").astype(str)
+    window_months = pd.period_range(
+        start=start_month, end=selected_month, freq="M"
+    ).astype(str)
     window_labels = [fmt_month(m) for m in window_months]
 
     for cat in selected_category:
@@ -439,7 +547,9 @@ def update_chart(selected_month, num_months, selected_category):
             gridcolor="rgba(0,0,0,0.06)",
             linecolor="rgba(0,0,0,0.1)",
         ),
-        yaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)", tickprefix="$"),
+        yaxis=dict(
+            gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)", tickprefix="$"
+        ),
         **{k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis", "yaxis")},
     )
 
@@ -486,6 +596,188 @@ def update_chart(selected_month, num_months, selected_category):
     )
     cumulative_line_figure.update_layout(**CHART_LAYOUT)
 
+    # --- Month-over-Month Change by Category ---
+    if prev_month is not None:
+        curr_cat = selected_month_categorical_in_out[["category", "total_out"]].rename(
+            columns={"total_out": "curr_out"}
+        )
+        prev_cat = category_monthly[category_monthly["month"] == prev_month][
+            ["category", "total_out"]
+        ].rename(columns={"total_out": "prev_out"})
+        mom_cat = curr_cat.merge(prev_cat, on="category", how="outer").fillna(0)
+        mom_cat["pct_change"] = (
+            (mom_cat["curr_out"] - mom_cat["prev_out"])
+            / mom_cat["prev_out"].replace(0, float("nan"))
+            * 100
+        )
+        mom_cat = mom_cat.dropna(subset=["pct_change"])
+        if "All" not in selected_category:
+            mom_cat = mom_cat[mom_cat["category"].isin(selected_category)]
+        mom_cat = mom_cat.sort_values("pct_change")
+        mom_fig = go.Figure(
+            go.Bar(
+                x=mom_cat["category"],
+                y=mom_cat["pct_change"],
+                marker_color=[
+                    "#e74c3c" if v > 0 else "#18bc9c" for v in mom_cat["pct_change"]
+                ],
+                marker_line_width=0,
+                text=[f"{v:+.1f}%" for v in mom_cat["pct_change"]],
+                textposition="outside",
+                hovertemplate="<b>%{x}</b><br>%{text}<extra></extra>",
+            )
+        )
+        mom_fig.update_layout(
+            xaxis_title="Category",
+            yaxis_title="% Change",
+            showlegend=False,
+            xaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)"),
+            yaxis=dict(
+                ticksuffix="%",
+                gridcolor="rgba(0,0,0,0.06)",
+                linecolor="rgba(0,0,0,0.1)",
+                zeroline=True,
+                zerolinecolor="rgba(0,0,0,0.2)",
+                zerolinewidth=1,
+            ),
+            **{k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis", "yaxis")},
+        )
+    else:
+        mom_fig = go.Figure()
+        mom_fig.add_annotation(
+            text="No prior month available",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=14, color="#6c757d"),
+        )
+        mom_fig.update_layout(**CHART_LAYOUT)
+
+    # --- Day-of-Week Spending Heatmap ---
+    window_tx = transactions_df[
+        (transactions_df["month"] >= start_month)
+        & (transactions_df["month"] <= selected_month)
+    ].copy()
+    cats_to_show = (
+        all_categories.tolist() if "All" in selected_category else selected_category
+    )
+    dow_tx = window_tx[window_tx["category"].isin(cats_to_show)].copy()
+    dow_tx["day_of_week"] = dow_tx["date"].dt.day_name()
+    daily_cat = dow_tx.groupby(["date", "category"])["money_out"].sum().reset_index()
+    daily_cat["day_of_week"] = pd.to_datetime(daily_cat["date"]).dt.day_name()
+    dow_avg = (
+        daily_cat.groupby(["category", "day_of_week"])["money_out"].mean().reset_index()
+    )
+    day_order = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
+    dow_pivot = dow_avg.pivot(
+        index="category", columns="day_of_week", values="money_out"
+    ).fillna(0)
+    dow_pivot = dow_pivot.reindex(
+        columns=[d for d in day_order if d in dow_pivot.columns]
+    )
+    dow_heatmap_fig = go.Figure(
+        go.Heatmap(
+            z=dow_pivot.values.tolist(),
+            x=[d[:3] for d in dow_pivot.columns.tolist()],
+            y=dow_pivot.index.tolist(),
+            colorscale=[[0, "#fff5f5"], [1, "#e74c3c"]],
+            text=[[f"${v:.0f}" for v in row] for row in dow_pivot.values],
+            texttemplate="%{text}",
+            showscale=False,
+            hovertemplate="<b>%{y}</b><br>%{x}: $%{z:.2f} avg<extra></extra>",
+        )
+    )
+    dow_heatmap_fig.update_layout(
+        xaxis_title="Day of Week",
+        xaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)"),
+        yaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)"),
+        **{k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis", "yaxis")},
+    )
+
+    # --- Budget Compliance History ---
+    compliance_records = []
+    for m in window_months:
+        m_cat = category_monthly[category_monthly["month"] == m]
+        if m_cat.empty:
+            continue
+        try:
+            b_data = evaluate_budget(budget, m_cat, "total_in", "total_out")
+            b_data = b_data[b_data["ItemType"] == "expense"]
+            budgeted = b_data[b_data["Type"] == "budgeted"].set_index("Category")[
+                "Value"
+            ]
+            actual_vals = b_data[b_data["Type"] == "actual"].set_index("Category")[
+                "Value"
+            ]
+            for cat in budgeted.index:
+                bval = float(budgeted[cat])
+                aval = float(actual_vals.get(cat, 0))
+                pct = ((aval - bval) / bval * 100) if bval != 0 else 0
+                compliance_records.append(
+                    {"month": fmt_month(m), "category": cat, "pct": pct}
+                )
+        except Exception:
+            continue
+
+    if compliance_records:
+        compliance_df = pd.DataFrame(compliance_records)
+        if "All" not in selected_category:
+            compliance_df = compliance_df[
+                compliance_df["category"].apply(
+                    lambda c: any(sc in c for sc in selected_category)
+                )
+            ]
+        if not compliance_df.empty:
+            comp_pivot = compliance_df.pivot_table(
+                index="category", columns="month", values="pct", aggfunc="first"
+            ).fillna(0)
+            ordered_labels = [fmt_month(m) for m in window_months]
+            comp_pivot = comp_pivot.reindex(
+                columns=[l for l in ordered_labels if l in comp_pivot.columns]
+            )
+            compliance_heatmap_fig = go.Figure(
+                go.Heatmap(
+                    z=comp_pivot.values.tolist(),
+                    x=comp_pivot.columns.tolist(),
+                    y=comp_pivot.index.tolist(),
+                    colorscale=[[0.0, "#18bc9c"], [0.5, "#f8f9fa"], [1.0, "#e74c3c"]],
+                    zmid=0,
+                    text=[[f"{v:+.0f}%" for v in row] for row in comp_pivot.values],
+                    texttemplate="%{text}",
+                    colorbar=dict(title="% vs Budget", ticksuffix="%"),
+                    hovertemplate="<b>%{y}</b><br>%{x}: %{text}<extra></extra>",
+                )
+            )
+            compliance_heatmap_fig.update_layout(
+                xaxis=dict(
+                    type="category",
+                    categoryorder="array",
+                    categoryarray=ordered_labels,
+                    gridcolor="rgba(0,0,0,0.06)",
+                    linecolor="rgba(0,0,0,0.1)",
+                ),
+                yaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)"),
+                **{
+                    k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis", "yaxis")
+                },
+            )
+        else:
+            compliance_heatmap_fig = go.Figure()
+            compliance_heatmap_fig.update_layout(**CHART_LAYOUT)
+    else:
+        compliance_heatmap_fig = go.Figure()
+        compliance_heatmap_fig.update_layout(**CHART_LAYOUT)
+
     # --- Monthly Summary Table ---
 
     monthly_transactions = transactions_df[
@@ -530,7 +822,11 @@ def update_chart(selected_month, num_months, selected_category):
         style_data_conditional=[
             {"if": {"filter_query": "{money_in} > 0"}, "color": "#18bc9c"},
             {"if": {"filter_query": "{money_out} > 0"}, "color": "#e74c3c"},
-            {"if": {"state": "selected"}, "backgroundColor": "#e8f5f2", "border": "none"},
+            {
+                "if": {"state": "selected"},
+                "backgroundColor": "#e8f5f2",
+                "border": "none",
+            },
         ],
         style_filter={
             "backgroundColor": "#fafafa",
@@ -544,12 +840,16 @@ def update_chart(selected_month, num_months, selected_category):
 
     return (
         kpi_cards,
+        income_kpi_cards,
         figure,
         line_figure,
         table,
         category_figure,
         budget_bar_fig,
+        mom_fig,
         cumulative_line_figure,
+        dow_heatmap_fig,
+        compliance_heatmap_fig,
     )
 
 

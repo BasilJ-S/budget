@@ -43,6 +43,10 @@ budgets/*.yaml ─────────────────────�
 
 Rules are dataclasses serialized to `rulesets/rules.yaml`. Each rule matches a substring pattern in the transaction description and assigns a category. `apply_rules()` in `clean.py` runs `str.contains()` over all transactions. Every save creates a timestamped backup in `rulesets/`.
 
+## Important
+
+Never read or access the data files directly. They contain personal financial data and should only be interacted with through the application code.
+
 ## Data Files (gitignored)
 
 All files under `src/budget/data/`, `src/budget/rulesets/`, and `src/budget/budgets/` are gitignored — these contain personal financial data. Place source CSVs in `src/budget/data/` before running `clean.py`.
