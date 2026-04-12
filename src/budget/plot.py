@@ -1,14 +1,14 @@
 import itertools
 import logging
-from tokenize import group
 
 import dash
+import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 from dash import dash_table, dcc, html
 from dash.dependencies import Input, Output
-from matplotlib import use
 
 from budget.budget_manager import evaluate_budget, read_budget
 
@@ -17,6 +17,8 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(filename)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+pio.templates.default = "plotly_white"
 
 # -- Data Preparation --
 
@@ -37,55 +39,205 @@ all_months = pd.period_range(
 
 all_categories = transactions_df["category"].dropna().unique()
 
-# --- Dash App ---
-app = dash.Dash(__name__)
 
-app.layout = html.Div(
-    [
-        html.H1("Monthly Money Summary"),
-        dcc.Dropdown(
-            id="month-dropdown",
-            options=[{"label": m, "value": m} for m in all_months],
-            value=all_months[-1],
-            clearable=False,
+def fmt_month(period_str: str) -> str:
+    """Convert '2024-01' to 'Jan 2024'."""
+    return pd.Period(period_str, freq="M").strftime("%b %Y")
+
+CHART_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    font=dict(family="Inter, system-ui, sans-serif", size=13),
+    margin=dict(l=40, r=20, t=48, b=40),
+    legend=dict(bgcolor="rgba(0,0,0,0)", borderwidth=0),
+    xaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)"),
+    yaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)", tickprefix="$"),
+)
+
+LABEL_STYLE = {
+    "fontSize": "0.75rem",
+    "textTransform": "uppercase",
+    "letterSpacing": "0.06em",
+    "color": "#6c757d",
+    "marginBottom": "4px",
+}
+
+# --- Dash App ---
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+
+app.layout = dbc.Container(
+    fluid=True,
+    className="px-4 py-3",
+    children=[
+        # Header
+        dbc.Row(
+            dbc.Col([
+                html.H2("Budget Dashboard", className="mb-0 fw-bold"),
+                html.P("Personal Finance Overview", className="text-muted mt-1 mb-0"),
+            ]),
+            className="mb-4 mt-2",
         ),
-        html.H2("Money In/Out for Selected Month"),
-        html.Div(
+
+        # Month control
+        dbc.Row(
+            dbc.Col(
+                [
+                    html.Label("Month", style=LABEL_STYLE),
+                    dcc.Dropdown(
+                        id="month-dropdown",
+                        options=[{"label": fmt_month(m), "value": m} for m in all_months],
+                        value=all_months[-1],
+                        clearable=False,
+                    ),
+                ],
+                md=3,
+            ),
+            className="mb-4",
+        ),
+
+        # KPI summary cards
+        dbc.Row(
+            id="kpi-row",
+            className="mb-4 g-3",
+        ),
+
+        # Monthly snapshot — two side-by-side charts
+        dbc.Row(
             [
-                dcc.Graph(id="monthly-bar-chart", style={"display": "inline-block"}),
-                dcc.Graph(
-                    id="monthly-category-chart", style={"display": "inline-block"}
+                dbc.Col(
+                    dbc.Card(
+                        [
+                            dbc.CardHeader("Monthly In / Out"),
+                            dbc.CardBody(dcc.Graph(id="monthly-bar-chart")),
+                        ],
+                        className="mb-4 shadow-sm",
+                    ),
+                    md=6,
+                ),
+                dbc.Col(
+                    dbc.Card(
+                        [
+                            dbc.CardHeader("Spending by Category"),
+                            dbc.CardBody(dcc.Graph(id="monthly-category-chart")),
+                        ],
+                        className="mb-4 shadow-sm",
+                    ),
+                    md=6,
+                ),
+            ]
+        ),
+
+        # Budget vs Actuals
+        dbc.Row(
+            dbc.Col(
+                dbc.Card(
+                    [
+                        dbc.CardHeader("Budget vs Actuals"),
+                        dbc.CardBody(dcc.Graph(id="monthly-budget-chart")),
+                    ],
+                    className="mb-4 shadow-sm",
+                )
+            )
+        ),
+
+        # Trends controls — apply to both charts below
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        html.Label("Look-back Months", style=LABEL_STYLE),
+                        dcc.Dropdown(
+                            id="num-months-dropdown",
+                            options=[
+                                {"label": m, "value": m}
+                                for m in range(1, len(all_months) + 1)
+                            ],
+                            value=6,
+                            clearable=False,
+                        ),
+                    ],
+                    md=2,
+                ),
+                dbc.Col(
+                    [
+                        html.Label("Category Filter", style=LABEL_STYLE),
+                        dcc.Dropdown(
+                            id="category-dropdown",
+                            options=[
+                                {"label": "All", "value": "All"},
+                                *(
+                                    {"label": str(cat), "value": str(cat)}
+                                    for cat in all_categories
+                                ),
+                            ],
+                            value="All",
+                            clearable=True,
+                            multi=True,
+                        ),
+                    ],
+                    md=5,
                 ),
             ],
-            className="row",
+            className="mb-3 align-items-end",
         ),
-        html.H2("Budget vs Actuals"),
-        dcc.Graph(id="monthly-budget-chart"),
-        dcc.Dropdown(
-            id="num-months-dropdown",
-            options=[{"label": m, "value": m} for m in range(1, len(all_months) + 1)],
-            value=6,
-            clearable=False,
+
+        # Trends
+        dbc.Row(
+            dbc.Col(
+                dbc.Card(
+                    [
+                        dbc.CardHeader("Monthly Trends by Category"),
+                        dbc.CardBody(dcc.Graph(id="monthly-line-chart")),
+                    ],
+                    className="mb-4 shadow-sm",
+                )
+            )
         ),
-        dcc.Dropdown(
-            id="category-dropdown",
-            options=[
-                {"label": "All", "value": "All"},
-                *({"label": str(cat), "value": str(cat)} for cat in all_categories),
-            ],
-            value="All",
-            clearable=True,
-            multi=True,
+
+        dbc.Row(
+            dbc.Col(
+                dbc.Card(
+                    [
+                        dbc.CardHeader("Cumulative Net Position"),
+                        dbc.CardBody(dcc.Graph(id="cumulative-line-chart")),
+                    ],
+                    className="mb-4 shadow-sm",
+                )
+            )
         ),
-        dcc.Graph(id="monthly-line-chart"),
-        dcc.Graph(id="cumulative-line-chart"),
-        html.H2("Monthly Summary Table"),
-        html.Div(id="monthly-summary-table"),
-    ]
+
+        # Transactions table
+        dbc.Row(
+            dbc.Col(
+                dbc.Card(
+                    [
+                        dbc.CardHeader("Monthly Transactions"),
+                        dbc.CardBody(html.Div(id="monthly-summary-table")),
+                    ],
+                    className="mb-4 shadow-sm",
+                )
+            )
+        ),
+    ],
 )
 
 
+def _kpi_card(label: str, value: str, color: str = "#2c3e50") -> dbc.Col:
+    return dbc.Col(
+        dbc.Card(
+            dbc.CardBody([
+                html.P(label, style={**LABEL_STYLE, "marginBottom": "6px"}),
+                html.H4(value, className="mb-0 fw-bold", style={"color": color}),
+            ]),
+            className="shadow-sm h-100",
+            style={"borderTop": f"3px solid {color}"},
+        ),
+        md=3, xs=6,
+    )
+
+
 @app.callback(
+    Output("kpi-row", "children"),
     Output("monthly-bar-chart", "figure"),
     Output("monthly-line-chart", "figure"),
     Output("monthly-summary-table", "children"),
@@ -106,27 +258,50 @@ def update_chart(selected_month, num_months, selected_category):
     monthly_summary = monthly_summary.reset_index().set_index("month")
     logger.info(f"Monthly Summary: {monthly_summary}")
 
+    # --- KPI Cards ---
+    m_in = monthly_summary.loc[selected_month, "total_in"]
+    m_out = monthly_summary.loc[selected_month, "total_out"]
+    m_net = m_in - m_out
+    # Month-over-month net change
+    all_month_list = sorted(monthly_summary.index.tolist())
+    prev_idx = all_month_list.index(selected_month) - 1
+    if prev_idx >= 0:
+        prev_month = all_month_list[prev_idx]
+        prev_out = monthly_summary.loc[prev_month, "total_out"]
+        mom_delta = m_out - prev_out
+        mom_sign = "+" if mom_delta >= 0 else ""
+        mom_label = f"{mom_sign}${mom_delta:,.0f} vs {fmt_month(prev_month)}"
+        mom_color = "#e74c3c" if mom_delta > 0 else "#18bc9c"
+    else:
+        mom_label = "No prior month"
+        mom_color = "#6c757d"
+
+    kpi_cards = [
+        _kpi_card("Money In", f"${m_in:,.2f}", "#18bc9c"),
+        _kpi_card("Money Out", f"${m_out:,.2f}", "#e74c3c"),
+        _kpi_card("Net", f"${m_net:,.2f}", "#18bc9c" if m_net >= 0 else "#e74c3c"),
+        _kpi_card("Spending vs Prior Month", mom_label, mom_color),
+    ]
+
     # --- Total In Out Bar Chart ---
 
     data = pd.DataFrame(
         {
             "Type": ["Money In", "Money Out"],
-            "Amount": [
-                monthly_summary.loc[selected_month, "total_in"],
-                monthly_summary.loc[selected_month, "total_out"],
-            ],
+            "Amount": [m_in, m_out],
         }
     )
     figure = px.bar(
         data,
         x="Type",
         y="Amount",
-        title=f"Money In/Out for {selected_month}",
-        labels={"Type": "Type", "Amount": "Amount"},
+        labels={"Type": "", "Amount": "Amount ($)"},
         text=data["Amount"].apply(lambda v: f"${v:,.2f}"),
         color="Type",
-        color_discrete_map={"Money In": "green", "Money Out": "red"},
+        color_discrete_map={"Money In": "#18bc9c", "Money Out": "#e74c3c"},
     )
+    figure.update_traces(textposition="outside", marker_line_width=0)
+    figure.update_layout(**CHART_LAYOUT, showlegend=False)
     logger.info(f"Overall Sum: {data['Amount'].sum()}")
 
     # --- Categorical In Out Bar Chart ---
@@ -153,10 +328,14 @@ def update_chart(selected_month, num_months, selected_category):
         x="category",
         y=["total_in", "total_out"],
         barmode="group",
-        title=f"Money In/Out by Category for {selected_month}",
-        labels={"value": "Amount", "category": "Category"},
-        color_discrete_map={"total_in": "green", "total_out": "red"},
+        labels={"value": "Amount ($)", "category": "Category", "variable": ""},
+        color_discrete_map={"total_in": "#18bc9c", "total_out": "#e74c3c"},
     )
+    category_figure.for_each_trace(
+        lambda t: t.update(name="In" if t.name == "total_in" else "Out")
+    )
+    category_figure.update_traces(marker_line_width=0)
+    category_figure.update_layout(**CHART_LAYOUT)
 
     # --- Budget vs Actuals ---
     budget = read_budget("Student")
@@ -179,10 +358,12 @@ def update_chart(selected_month, num_months, selected_category):
         y="Value",
         color="Type",
         barmode="group",
-        title="Budgeted vs Actual by Category",
-        labels={"Value": "Amount ($)", "Category": "Category", "Type": "Type"},
+        labels={"Value": "Amount ($)", "Category": "Category", "Type": ""},
         text=budget_data["Value"].apply(lambda v: f"${v:,.2f}"),
+        color_discrete_map={"budget": "#95a5a6", "actual": "#e74c3c"},
     )
+    budget_bar_fig.update_traces(textposition="outside", marker_line_width=0)
+    budget_bar_fig.update_layout(**CHART_LAYOUT)
 
     start_month = str(pd.Period(selected_month, freq="M") - (num_months - 1))
 
@@ -201,6 +382,9 @@ def update_chart(selected_month, num_months, selected_category):
     color_cycle = itertools.cycle(color_palette)
     category_colors = {cat: next(color_cycle) for cat in selected_category}
 
+    window_months = pd.period_range(start=start_month, end=selected_month, freq="M").astype(str)
+    window_labels = [fmt_month(m) for m in window_months]
+
     for cat in selected_category:
         if cat == "All":
             cat_data = (
@@ -214,41 +398,49 @@ def update_chart(selected_month, num_months, selected_category):
         else:
             cat_data = prev_months[prev_months["category"] == cat]
         logger.info(f"Category Data for {cat}: {cat_data}")
-        # add 0 for months with no data
-        all_months = pd.period_range(
-            start=start_month, end=selected_month, freq="M"
-        ).astype(str)
+        # Fill missing months with 0 and use formatted labels
         cat_data = (
             cat_data.set_index("month")
-            .reindex(all_months, fill_value=0)
+            .reindex(window_months, fill_value=0)
             .reset_index()
             .rename(columns={"index": "month"})
         )
-        # Money In: solid line
+        cat_data["month_label"] = [fmt_month(m) for m in cat_data["month"]]
+        # Money In: dashed line
         line_figure.add_trace(
             go.Scatter(
-                x=cat_data["month"],
+                x=cat_data["month_label"],
                 y=cat_data["total_in"],
-                mode="lines",
+                mode="lines+markers",
                 name=f"{cat} In",
                 line=dict(color=category_colors[cat], dash="dash"),
+                marker=dict(size=5),
             )
         )
-        # Money Out: dashed line
+        # Money Out: solid line
         line_figure.add_trace(
             go.Scatter(
-                x=cat_data["month"],
+                x=cat_data["month_label"],
                 y=cat_data["total_out"],
-                mode="lines",
+                mode="lines+markers",
                 name=f"{cat} Out",
                 line=dict(color=category_colors[cat], dash="solid"),
+                marker=dict(size=5),
             )
         )
 
     line_figure.update_layout(
-        title=f"Money In/Out By Category for Last {num_months} Months up to {selected_month}",
         xaxis_title="Month",
-        yaxis_title="Amount",
+        yaxis_title="Amount ($)",
+        xaxis=dict(
+            type="category",
+            categoryorder="array",
+            categoryarray=window_labels,
+            gridcolor="rgba(0,0,0,0.06)",
+            linecolor="rgba(0,0,0,0.1)",
+        ),
+        yaxis=dict(gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)", tickprefix="$"),
+        **{k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis", "yaxis")},
     )
 
     # --- Cumulative Line Chart ---
@@ -281,13 +473,18 @@ def update_chart(selected_month, num_months, selected_category):
         daily_cumulative,
         x="date",
         y=["cumulative", "cumulative_rolling_avg"],
-        title=f"Cumulative Money for Last {num_months} Months up to {selected_month}",
-        labels={"value": "Amount", "month": "Month"},
+        labels={"value": "Amount ($)", "date": "Date", "variable": ""},
         color_discrete_map={
-            "cumulative": "blue",
-            "cumulative_rolling_avg": "lightblue",
+            "cumulative": "#2c3e50",
+            "cumulative_rolling_avg": "rgba(44,62,80,0.35)",
         },
     )
+    cumulative_line_figure.for_each_trace(
+        lambda t: t.update(
+            name="Net Position" if t.name == "cumulative" else "20-day Average"
+        )
+    )
+    cumulative_line_figure.update_layout(**CHART_LAYOUT)
 
     # --- Monthly Summary Table ---
 
@@ -311,13 +508,42 @@ def update_chart(selected_month, num_months, selected_category):
         ],
         data=monthly_transactions.to_dict("records"),
         style_table={"overflowX": "auto"},
-        style_cell={"textAlign": "left"},
+        style_header={
+            "backgroundColor": "#f8f9fa",
+            "fontWeight": "600",
+            "fontSize": "0.78rem",
+            "textTransform": "uppercase",
+            "letterSpacing": "0.06em",
+            "border": "none",
+            "borderBottom": "2px solid #dee2e6",
+            "color": "#6c757d",
+        },
+        style_cell={
+            "backgroundColor": "white",
+            "textAlign": "left",
+            "fontSize": "0.875rem",
+            "padding": "10px 14px",
+            "border": "none",
+            "borderBottom": "1px solid #f0f0f0",
+            "fontFamily": "Inter, system-ui, sans-serif",
+        },
+        style_data_conditional=[
+            {"if": {"filter_query": "{money_in} > 0"}, "color": "#18bc9c"},
+            {"if": {"filter_query": "{money_out} > 0"}, "color": "#e74c3c"},
+            {"if": {"state": "selected"}, "backgroundColor": "#e8f5f2", "border": "none"},
+        ],
+        style_filter={
+            "backgroundColor": "#fafafa",
+            "border": "none",
+            "borderBottom": "1px solid #e9ecef",
+        },
         sort_action="native",
         filter_action="native",
     )
     logger.info("Update complete")
 
     return (
+        kpi_cards,
         figure,
         line_figure,
         table,
