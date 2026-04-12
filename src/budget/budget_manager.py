@@ -32,6 +32,7 @@ class Budget:
 class BudgetItem:
     categories: list[str]
     budgeted_amount: float
+    item_type: str = "expense"  # "expense" or "income"
 
 
 def write_budget(budget: Budget, filename: str | None = None):
@@ -77,7 +78,11 @@ def get_budget_item(ruleset: Ruleset) -> BudgetItem:
         raise ValueError(f"Invalid category shorthand, {categories}.")
 
     amount = float(input("Enter budgeted amount: "))
-    item = BudgetItem(categories=resolved_categories, budgeted_amount=amount)
+    item_type = (
+        input("Item type — expense or income? (e/i, default: expense): ").strip().lower()
+    )
+    item_type = "income" if item_type == "i" else "expense"
+    item = BudgetItem(categories=resolved_categories, budgeted_amount=amount, item_type=item_type)
     return item
 
 
@@ -123,7 +128,7 @@ def print_budget_items(budget: Budget):
     )
     for idx, item in enumerate(budget.items):
         logger.info(
-            f"{idx + 1}. Categories: {item.categories}, Amount: {item.budgeted_amount}"
+            f"{idx + 1}. [{item.item_type}] Categories: {item.categories}, Amount: {item.budgeted_amount}"
         )
 
 
@@ -177,7 +182,7 @@ def evaluate_budget(
     Returns DF with budgeted and actual amounts per category, with columns
     'Category', 'Type', and 'Value'.
     """
-    budget_data = pd.DataFrame(columns=["Category", "Type", "Value"])
+    budget_data = pd.DataFrame(columns=["Category", "Type", "Value", "ItemType"])
     for item in budget.items:
         logger.info(f"Item: {item.categories}, Budgeted Amount: {item.budgeted_amount}")
         category_data = transactions_df[
@@ -192,11 +197,13 @@ def evaluate_budget(
             ", ".join(item.categories),
             "budgeted",
             item.budgeted_amount,
+            item.item_type,
         ]
         budget_data.loc[len(budget_data), :] = [
             ", ".join(item.categories),
             "actual",
             actual,
+            item.item_type,
         ]
 
     ## Handle unbudgeted data ##
@@ -214,16 +221,19 @@ def evaluate_budget(
     )
     unbudgeted_amount = unbudgeted_out - unbudgeted_in
 
-    # Find how much of the total budget was not allocated to any category
-    total_budgeted = sum(item.budgeted_amount for item in budget.items)
-    unallocated_budget = budget.total_budgeted - total_budgeted
+    # Find how much of the total budget was not allocated to any expense category
+    total_expense_budgeted = sum(
+        item.budgeted_amount for item in budget.items if item.item_type == "expense"
+    )
+    unallocated_budget = budget.total_budgeted - total_expense_budgeted
 
     budget_data.loc[len(budget_data), :] = [
         "Unbudgeted",
         "budgeted",
         unallocated_budget,
+        "expense",
     ]
-    budget_data.loc[len(budget_data), :] = ["Unbudgeted", "actual", unbudgeted_amount]
+    budget_data.loc[len(budget_data), :] = ["Unbudgeted", "actual", unbudgeted_amount, "expense"]
     logger.info(f"BUDGET: {budget_data}")
 
     return budget_data
