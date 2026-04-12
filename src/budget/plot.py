@@ -111,6 +111,31 @@ app.layout = dbc.Container(
             id="income-kpi-row",
             className="mb-4 g-3",
         ),
+        # Income trends — side by side
+        dbc.Row(
+            [
+                dbc.Col(
+                    dbc.Card(
+                        [
+                            dbc.CardHeader("Income / Expenses / Net"),
+                            dbc.CardBody(dcc.Graph(id="income-trend-chart")),
+                        ],
+                        className="mb-4 shadow-sm",
+                    ),
+                    md=6,
+                ),
+                dbc.Col(
+                    dbc.Card(
+                        [
+                            dbc.CardHeader("Savings Rate"),
+                            dbc.CardBody(dcc.Graph(id="savings-rate-chart")),
+                        ],
+                        className="mb-4 shadow-sm",
+                    ),
+                    md=6,
+                ),
+            ]
+        ),
         # Monthly snapshot — two side-by-side charts
         dbc.Row(
             [
@@ -284,6 +309,8 @@ def _kpi_card(label: str, value: str, color: str = "#2c3e50") -> dbc.Col:
 @app.callback(
     Output("kpi-row", "children"),
     Output("income-kpi-row", "children"),
+    Output("income-trend-chart", "figure"),
+    Output("savings-rate-chart", "figure"),
     Output("monthly-bar-chart", "figure"),
     Output("monthly-line-chart", "figure"),
     Output("monthly-summary-table", "children"),
@@ -778,6 +805,88 @@ def update_chart(selected_month, num_months, selected_category):
         compliance_heatmap_fig = go.Figure()
         compliance_heatmap_fig.update_layout(**CHART_LAYOUT)
 
+    # --- Income / Expenses / Net + Savings Rate Trends ---
+    income_trend_records = []
+    for m in window_months:
+        m_cat = category_monthly[category_monthly["month"] == m]
+        if m_cat.empty:
+            continue
+        try:
+            b_data = evaluate_budget(budget, m_cat, "total_in", "total_out")
+            exp = b_data[(b_data["ItemType"] == "expense") & (b_data["Type"] == "actual")]
+            inc = b_data[(b_data["ItemType"] == "income") & (b_data["Type"] == "actual")]
+            m_expense = exp["Value"].sum()
+            m_income = -inc["Value"].sum()  # income actuals are out - in, negate
+            m_net = m_income - m_expense
+            m_savings = (m_net / m_income * 100) if m_income > 0 else 0
+            income_trend_records.append({
+                "month": fmt_month(m),
+                "Income": m_income,
+                "Expenses": m_expense,
+                "Net": m_net,
+                "Savings Rate": m_savings,
+            })
+        except Exception:
+            continue
+
+    ordered_labels = [fmt_month(m) for m in window_months]
+    if income_trend_records:
+        trend_df = pd.DataFrame(income_trend_records)
+        income_trend_fig = go.Figure()
+        income_trend_fig.add_trace(go.Bar(
+            x=trend_df["month"], y=trend_df["Income"], name="Income",
+            marker_color="#18bc9c", marker_line_width=0,
+        ))
+        income_trend_fig.add_trace(go.Bar(
+            x=trend_df["month"], y=trend_df["Expenses"], name="Expenses",
+            marker_color="#e74c3c", marker_line_width=0,
+        ))
+        income_trend_fig.add_trace(go.Scatter(
+            x=trend_df["month"], y=trend_df["Net"], name="Net",
+            mode="lines+markers", line=dict(color="#2c3e50", width=2),
+            marker=dict(size=6),
+        ))
+        income_trend_fig.update_layout(
+            barmode="group",
+            xaxis=dict(
+                type="category", categoryorder="array", categoryarray=ordered_labels,
+                gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)",
+            ),
+            yaxis=dict(
+                gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)", tickprefix="$",
+            ),
+            **{k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis", "yaxis")},
+        )
+
+        savings_rate_fig = go.Figure()
+        savings_rate_fig.add_trace(go.Bar(
+            x=trend_df["month"], y=trend_df["Savings Rate"],
+            marker_color=[
+                "#18bc9c" if v >= 0 else "#e74c3c" for v in trend_df["Savings Rate"]
+            ],
+            marker_line_width=0,
+            text=[f"{v:.1f}%" for v in trend_df["Savings Rate"]],
+            textposition="outside",
+            hovertemplate="<b>%{x}</b><br>%{text}<extra></extra>",
+        ))
+        savings_rate_fig.update_layout(
+            showlegend=False,
+            xaxis=dict(
+                type="category", categoryorder="array", categoryarray=ordered_labels,
+                gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)",
+            ),
+            yaxis=dict(
+                ticksuffix="%", gridcolor="rgba(0,0,0,0.06)", linecolor="rgba(0,0,0,0.1)",
+                zeroline=True, zerolinecolor="rgba(0,0,0,0.2)", zerolinewidth=1,
+            ),
+            **{k: v for k, v in CHART_LAYOUT.items() if k not in ("xaxis", "yaxis")},
+        )
+    else:
+        income_trend_fig = go.Figure()
+        income_trend_fig.update_layout(**CHART_LAYOUT)
+        savings_rate_fig = go.Figure()
+        savings_rate_fig.update_layout(**CHART_LAYOUT)
+
     # --- Monthly Summary Table ---
 
     monthly_transactions = transactions_df[
@@ -841,6 +950,8 @@ def update_chart(selected_month, num_months, selected_category):
     return (
         kpi_cards,
         income_kpi_cards,
+        income_trend_fig,
+        savings_rate_fig,
         figure,
         line_figure,
         table,
